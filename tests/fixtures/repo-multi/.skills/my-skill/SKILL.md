@@ -1,0 +1,1 @@
+# my-skill (in .skills/ — third priority)

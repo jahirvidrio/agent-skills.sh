@@ -1,10 +1,11 @@
 #!/bin/sh
-# scripts/lint.sh - POSIX-style lint gate for agent-skills.sh.
+# scripts/lint.sh - POSIX-style lint + test gate for agent-skills.sh.
 #
 # Runs (in order):
-#   1. dash -n          syntax check (POSIX-strict shell)
-#   2. shellcheck -s sh static analysis in POSIX mode
-#   3. checkbashisms    optional: skipped if not installed
+#   1. scripts/test.sh  bats test suite (skipped if bats is not installed)
+#   2. dash -n           syntax check (POSIX-strict shell)
+#   3. shellcheck -s sh  static analysis in POSIX mode
+#   4. checkbashisms     optional: skipped if not installed
 #
 # Exits 0 if all checks pass.
 
@@ -27,6 +28,16 @@ command -v shellcheck >/dev/null 2>&1 || {
     printf 'error: shellcheck is required for lint\n' >&2
     exit 1
 }
+
+if command -v bats >/dev/null 2>&1; then
+    printf '>> scripts/test.sh\n'
+    if ! "$script_dir/test.sh"; then
+        printf 'error: tests failed\n' >&2
+        exit 1
+    fi
+else
+    printf '>> bats not installed, skipping tests (brew install bats-core)\n'
+fi
 
 printf '>> dash -n %s\n' "$target"
 dash -n "$target"

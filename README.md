@@ -45,7 +45,13 @@ When multiple directories named `<skill-name>` are found, the script sorts them 
 
 ## Development
 
-Run the lint gate (syntax check + POSIX shellcheck + optional checkbashisms):
+Run the test suite (bats):
+
+```
+./scripts/test.sh
+```
+
+Run the full gate (tests + syntax check + POSIX shellcheck + optional checkbashisms):
 
 ```
 ./scripts/lint.sh

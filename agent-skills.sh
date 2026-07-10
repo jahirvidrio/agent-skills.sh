@@ -289,13 +289,17 @@ clone_or_update() {
         exit 1
     fi
 
+    _co_partial=$_cache_dir
+    trap 'rm -rf -- "$_co_partial" 2>/dev/null; trap - EXIT INT TERM' EXIT INT TERM
+
     if ! git clone --depth=1 "$_url" "$_cache_dir"; then
-        # Clone failed mid-way: clean up the partial dir so the next run
-        # can retry cleanly.
+        trap - EXIT INT TERM
         rm -rf -- "$_cache_dir"
         log "error: git clone failed for $_url"
         exit 4
     fi
+
+    trap - EXIT INT TERM
     return 0
 }
 
@@ -325,20 +329,22 @@ find_skill_dir() {
         exit 3
     fi
 
-    _count=$(printf '%s\n' "$_matches" | grep -c .)
+    _count=$(printf '%s\n' "$_matches" | awk 'END{print NR}')
 
     if [ "$_count" -eq 1 ]; then
         printf '%s\n' "$_matches"
         return 0
     fi
 
-    # Multiple matches: sort by canonical-location priority, then
+    # Multiple matches: rank by canonical-location priority, then
     # alphabetically within each bucket. Lower priority number = earlier.
     #   1) .agents/    2) .opencode/    3) .claude/    4) skills/    5) other
-    _sorted=$(printf '%s\n' "$_matches" | awk -v root="$_root" '
+    # Use substr() instead of sub() so cache paths containing regex
+    # metacharacters don't break ranking.
+    _plen=${#_root}
+    _sorted=$(printf '%s\n' "$_matches" | awk -v plen="$_plen" '
         {
-            rel = $0
-            sub("^" root "/", "", rel)
+            rel = substr($0, plen + 2)
             first = rel
             sub("/.*", "", first)
             pri = 5
@@ -347,15 +353,20 @@ find_skill_dir() {
             else if (first == ".claude")   pri = 3
             else if (first == "skills")    pri = 4
             printf "%d\t%s\n", pri, $0
-        }' | sort | cut -f2-)
+        }' | sort -k1,1n | cut -f2-) || {
+        log "error: ranking pipeline failed"
+        exit 1
+    }
 
     if [ ! -t 0 ]; then
         log "error: $_count skills named '$_name' found; \
 cannot prompt (stdin is not a TTY)"
         log "  matches:"
-        for _path in $(printf '%s\n' "$_sorted"); do
+        while IFS= read -r _path; do
             log "    ${_path#"$_root"/}"
-        done
+        done <<EOF
+$_sorted
+EOF
         log "  re-run with a more specific skill name, or pick one of \
 the above paths manually"
         exit 5
@@ -364,10 +375,12 @@ the above paths manually"
     # Interactive: present a numbered list and prompt.
     log "Found $_count matches for '$_name':"
     _i=0
-    for _path in $(printf '%s\n' "$_sorted"); do
+    while IFS= read -r _path; do
         _i=$((_i + 1))
         printf '  %d) %s\n' "$_i" "${_path#"$_root"/}" >&2
-    done
+    done <<EOF
+$_sorted
+EOF
 
     _choice=$(prompt_choice "Select [1-$_count] (default: 1): " "$_count")
 

@@ -15,6 +15,7 @@ The script clones `<repo>` (cached at `~/.cache/agent-skills/<owner>/<repo>` and
 - `owner/repo`            → `https://github.com/owner/repo.git`
 - `https://host/path`     → used as-is
 - `git@host:owner/repo`   → used as-is
+- `file:///local/path`    → used as-is (useful for local testing; cached under `local/<basename>`)
 
 ### Examples
 
@@ -41,3 +42,11 @@ When multiple directories named `<skill-name>` are found, the script sorts them 
 
 - POSIX `sh` (dash, ash, bash --posix, etc.)
 - `git`
+
+## Development
+
+Run the lint gate (syntax check + POSIX shellcheck + optional checkbashisms):
+
+```
+./scripts/lint.sh
+```

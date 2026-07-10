@@ -1,36 +1,6 @@
 #!/bin/sh
-# agent-skills.sh - Download an agent skill from a git repository.
-#
-# Usage:
-#   agent-skills.sh <repo> <skill-name> <dest-dir>
-#
-# Arguments:
-#   repo       Repository identifier. Recognized forms:
-#                owner/repo            -> https://github.com/owner/repo.git
-#                https://host/path     -> used as-is
-#                git@host:owner/repo   -> used as-is
-#   skill-name Name of the skill directory (must directly contain SKILL.md).
-#   dest-dir   Destination directory. Created if missing. The skill lands at
-#              dest-dir/<skill-name>, replacing any prior copy.
-#
-# Cache:
-#   Repos are cached at $HOME/.cache/agent-skills/<owner>/<repo> and
-#   reused across runs. Each invocation refreshes the cached clone with
-#   `git pull --depth=1`.
-#
-# Exit codes:
-#   0  success
-#   1  generic error
-#   2  invalid arguments
-#   3  skill not found in repo
-#   4  git clone/pull failed
-#   5  ambiguous match (multiple skills with the requested name, and
-#      stdin is not a TTY so the script cannot ask which one to use)
-#
-# Examples:
-#   agent-skills.sh sickn33/agentic-awesome-skills my-skill ./skills
-#   agent-skills.sh https://github.com/owner/repo.git my-skill /tmp/skills
-#   agent-skills.sh git@github.com:owner/repo.git my-skill ./skills
+# agent-skills.sh - download an agent skill from a git repository.
+# Run with --help for usage, exit codes, and examples.
 
 set -eu
 
@@ -87,7 +57,6 @@ prompt_choice() {
 
         case $_pc_answer in
             '')
-                # Empty input (just Enter) -> default to option 1
                 printf '%s\n' "1"
                 return 0
                 ;;
@@ -111,22 +80,41 @@ prompt_choice() {
 # ---- Help ------------------------------------------------------------------
 
 usage() {
-    _code=${1:-0}
-    # Print the header comment block. Skip the shebang line; stop at the
-    # first blank line; strip the leading "# " (or "#") from each line.
-    while IFS= read -r _line; do
-        case $_line in
-            '#!'*) continue ;;
-        esac
-        if [ -z "$_line" ]; then
-            break
-        fi
-        case $_line in
-            '# '*) printf '%s\n' "${_line#\# }" >&2 ;;
-            '#'*)  printf '%s\n' "${_line#\#}"  >&2 ;;
-        esac
-    done < "$0"
-    exit "$_code"
+    cat <<'EOF' >&2
+agent-skills.sh - Download an agent skill from a git repository.
+
+Usage:
+  agent-skills.sh <repo> <skill-name> <dest-dir>
+
+Arguments:
+  repo       Repository identifier. Recognized forms:
+               owner/repo            -> https://github.com/owner/repo.git
+               https://host/path     -> used as-is
+               git@host:owner/repo   -> used as-is
+  skill-name Name of the skill directory (must directly contain SKILL.md).
+  dest-dir   Destination directory. Created if missing. The skill lands at
+             dest-dir/<skill-name>, replacing any prior copy.
+
+Cache:
+  Repos are cached at $HOME/.cache/agent-skills/<owner>/<repo> and
+  reused across runs. Each invocation refreshes the cached clone with
+  `git pull --depth=1`.
+
+Exit codes:
+  0  success
+  1  generic error
+  2  invalid arguments
+  3  skill not found in repo
+  4  git clone/pull failed
+  5  ambiguous match (multiple skills with the requested name, and
+     stdin is not a TTY so the script cannot ask which one to use)
+
+Examples:
+  agent-skills.sh sickn33/agentic-awesome-skills my-skill ./skills
+  agent-skills.sh https://github.com/owner/repo.git my-skill /tmp/skills
+  agent-skills.sh git@github.com:owner/repo.git my-skill ./skills
+EOF
+    exit "${1:-0}"
 }
 
 # ---- Argument validation ---------------------------------------------------
@@ -399,6 +387,15 @@ EOF
 
 # ---- Copy ------------------------------------------------------------------
 
+# strip_dot_git <dir>
+# Removes <dir>/.git if present. Skills in their own subdir should never
+# carry a .git tree, but cp -Rp can leak it if the source had one.
+strip_dot_git() {
+    if [ -d "$1/.git" ]; then
+        rm -rf -- "$1/.git"
+    fi
+}
+
 # copy_skill <src_dir> <dest_parent> <name>
 # Copies <src_dir> to <dest_parent>/<name>, replacing any existing target.
 copy_skill() {
@@ -426,11 +423,7 @@ copy_skill() {
         die 1 "error: copy failed: $_src -> $_dest"
     fi
 
-    # Defensive: strip any .git that may have leaked (shouldn't happen for
-    # skills in their own subdir, but cheap to verify).
-    if [ -d "$_dest/.git" ]; then
-        rm -rf -- "$_dest/.git"
-    fi
+    strip_dot_git "$_dest"
 
     log "Installed: $_dest"
 }
@@ -438,13 +431,13 @@ copy_skill() {
 # ---- Main ------------------------------------------------------------------
 
 main() {
-    print_banner
-
     case ${1:-} in
         -h|--help)
             usage 0
             ;;
     esac
+
+    print_banner
 
     if [ $# -ne 3 ]; then
         usage 2

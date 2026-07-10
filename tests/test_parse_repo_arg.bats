@@ -13,10 +13,6 @@
 
 load 'lib/test_helper'
 
-cache_root() {
-    printf '%s/.cache/agent-skills' "$HOME"
-}
-
 @test "short form owner/repo resolves to github https URL" {
     run_script_with_fake_git owner/repo valid-skill /tmp/dest
     [ "$status" -eq 3 ]

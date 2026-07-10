@@ -232,7 +232,10 @@ extract_owner_repo_from_url() {
 
 # validate_skill_name <name>
 # Dies with code 2 on invalid input. Accepted: [A-Za-z0-9._-], no
-# leading dot, no path separators.
+# leading dot, no path separators, length 1..MAX_SKILL_NAME_LEN.
+# The cap protects log lines and copy paths from absurd inputs.
+MAX_SKILL_NAME_LEN=100
+
 validate_skill_name() {
     _name=$1
 
@@ -254,6 +257,10 @@ validate_skill_name() {
             esac
             ;;
     esac
+
+    if [ "${#_name}" -gt "$MAX_SKILL_NAME_LEN" ]; then
+        die 2 "error: invalid skill name '$_name' (longer than $MAX_SKILL_NAME_LEN chars)"
+    fi
 }
 
 # ---- Git operations --------------------------------------------------------
@@ -354,6 +361,9 @@ $_sorted
 EOF
         log "  re-run with a more specific skill name, or pick one of the above paths manually"
         exit 5
+        # Note on heredoc style: <<EOF (no quotes) intentionally
+        # expands $_sorted; print_banner and usage use <<'EOF' (quoted)
+        # so their bodies stay literal.
     fi
 
     prompt_user_for_match "$_root" "$_name" "$_count" "$_sorted"

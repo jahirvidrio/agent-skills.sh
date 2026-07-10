@@ -53,3 +53,16 @@ load 'lib/test_helper'
     run_script_with_fake_git owner/repo "my.skill-v2" /tmp/dest
     [ "$status" -eq 3 ]
 }
+
+@test "skill name longer than 100 chars exits 2" {
+    LONG=$(printf 'a%.0s' {1..101})
+    run_script_with_fake_git owner/repo "$LONG" /tmp/dest
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"longer than 100 chars"* ]]
+}
+
+@test "skill name exactly 100 chars is accepted" {
+    EXACT=$(printf 'a%.0s' {1..100})
+    run_script_with_fake_git owner/repo "$EXACT" /tmp/dest
+    [ "$status" -eq 3 ]
+}

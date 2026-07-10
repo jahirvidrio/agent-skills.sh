@@ -6,6 +6,7 @@ set -eu
 
 # ---- Configuration ---------------------------------------------------------
 
+VERSION="0.1.0"
 CACHE_ROOT="${HOME:?HOME must be set}/.cache/agent-skills"
 
 # ---- Prerequisites ---------------------------------------------------------
@@ -22,6 +23,12 @@ log() {
 }
 
 print_banner() {
+    # Banner is gated by SHOW_BANNER (set by parse_args when --no-banner
+    # is passed) and AGENT_SKILLS_NO_BANNER (env-var override for CI).
+    # Using `${VAR:-}` keeps set -u happy when neither is set.
+    if [ "${SHOW_BANNER:-1}" -eq 0 ] || [ -n "${AGENT_SKILLS_NO_BANNER:-}" ]; then
+        return 0
+    fi
     cat <<'EOF' >&2
                    _          _   _ _ _         _
  __ _ __ _ ___ _ _| |_ ___ __| |_(_) | |___  __| |_
@@ -31,6 +38,10 @@ print_banner() {
 
 
 EOF
+}
+
+print_version() {
+    printf 'agent-skills.sh %s\n' "$VERSION"
 }
 
 die() {
@@ -84,7 +95,13 @@ usage() {
 agent-skills.sh - Download an agent skill from a git repository.
 
 Usage:
-  agent-skills.sh <repo> <skill-name> <dest-dir>
+  agent-skills.sh [options] <repo> <skill-name> <dest-dir>
+
+Options:
+  -h, --help     show this help and exit
+  --version      print version and exit
+  --no-banner    suppress the startup banner (also: AGENT_SKILLS_NO_BANNER=1)
+  --             end of options; everything after is positional
 
 Arguments:
   repo       Repository identifier. Recognized forms:
@@ -113,6 +130,7 @@ Examples:
   agent-skills.sh sickn33/agentic-awesome-skills my-skill ./skills
   agent-skills.sh https://github.com/owner/repo.git my-skill /tmp/skills
   agent-skills.sh git@github.com:owner/repo.git my-skill ./skills
+  agent-skills.sh --no-banner owner/repo my-skill ./skills
 EOF
     exit "${1:-0}"
 }
@@ -454,14 +472,43 @@ copy_skill() {
 
 # ---- Main ------------------------------------------------------------------
 
-main() {
-    case ${1:-} in
-        -h|--help)
-            usage 0
-            ;;
-    esac
-
-    print_banner
+# parse_args <args...>
+# Walks the argument list, handles flags, and writes the three
+# positional args into globals REPO_ARG, SKILL_NAME, DEST_DIR.
+# Flags recognized:
+#   -h, --help     -> usage 0 (exits)
+#   --version      -> print_version then exit 0
+#   --no-banner    -> sets SHOW_BANNER=0 (consumed by print_banner)
+#   --             -> end of flags; rest are positional
+# Any other -X flag dies with code 2. Dies with code 2 if the
+# remaining positional count is not exactly 3.
+parse_args() {
+    _pa_show_banner=1
+    while [ $# -gt 0 ]; do
+        case $1 in
+            -h|--help)
+                usage 0
+                ;;
+            --version)
+                print_version
+                exit 0
+                ;;
+            --no-banner)
+                _pa_show_banner=0
+                ;;
+            --)
+                shift
+                break
+                ;;
+            -*)
+                die 2 "error: unknown flag '$1'"
+                ;;
+            *)
+                break
+                ;;
+        esac
+        shift
+    done
 
     if [ $# -ne 3 ]; then
         usage 2
@@ -470,6 +517,13 @@ main() {
     REPO_ARG=$1
     SKILL_NAME=$2
     DEST_DIR=$3
+    SHOW_BANNER=$_pa_show_banner
+}
+
+main() {
+    parse_args "$@"
+
+    print_banner
 
     validate_skill_name "$SKILL_NAME"
     parse_repo_arg "$REPO_ARG"

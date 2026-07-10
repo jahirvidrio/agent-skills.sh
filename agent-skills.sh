@@ -131,9 +131,7 @@ parse_repo_arg() {
             die 2 "error: repo argument is empty"
             ;;
         git@*|ssh://*|https://*|http://*|file://*)
-            _pfx=$(extract_owner_repo_from_url "$_arg")
-            REPO_URL=$(printf '%s\n' "$_pfx" | sed -n '1p')
-            CACHE_KEY=$(printf '%s\n' "$_pfx" | sed -n '2p')
+            extract_owner_repo_from_url "$_arg"
             ;;
         # Short form: owner/repo (exactly one slash, no protocol, no colon)
         */*)
@@ -157,9 +155,11 @@ parse_repo_arg() {
 }
 
 # extract_owner_repo_from_url <url>
-# Resolves a full git URL into "<url>\n<cache-key>" on stdout. The cache
-# key is owner/repo (or local/REPO for file://) — usable as a path
-# segment under the cache root. Dies with code 2 on a malformed URL.
+# Resolves a full git URL and writes the result into globals REPO_URL
+# (preserved verbatim) and CACHE_KEY (owner/repo, or local/REPO for
+# file:// — usable as a path segment under the cache root). Dies with
+# code 2 on a malformed URL. Sets globals instead of printing to keep
+# the contract aligned with parse_repo_arg's caller.
 extract_owner_repo_from_url() {
     _url=$1
 
@@ -192,7 +192,8 @@ extract_owner_repo_from_url() {
             if [ -z "$_base" ] || [ "$_path" = "$_base" ]; then
                 die 2 "error: cannot extract repo name from '$_url'"
             fi
-            printf '%s\n%s\n' "$_url" "local/$_base"
+            REPO_URL=$_url
+            CACHE_KEY="local/$_base"
             return 0
             ;;
         *)
@@ -202,7 +203,8 @@ extract_owner_repo_from_url() {
 
     case $_path in
         */*)
-            printf '%s\n%s\n' "$_url" "$_path"
+            REPO_URL=$_url
+            CACHE_KEY=$_path
             ;;
         *)
             die 2 "error: cannot extract owner/repo from '$_url'"
@@ -287,6 +289,14 @@ clone_or_update() {
 #               forced to disambiguate explicitly.
 # Dies 3 if nothing matches; exits 5 if ambiguous in non-interactive
 # mode; dies 1 on EOF or too many invalid attempts in interactive mode.
+# find_skill_dir <root> <name>
+# Orchestrates skill discovery for a given cache root:
+#   1. discover all directories named <name> containing SKILL.md
+#   2. early-return the single match if there is exactly one
+#   3. rank the matches by canonical-location priority
+#   4. delegate the TTY-vs-non-TTY disambiguation to pick_skill_match
+# Dies 3 if nothing matches; defers all exit codes >= 4 to
+# pick_skill_match / prompt_user_for_match.
 find_skill_dir() {
     _root=$1
     _name=$2
@@ -300,6 +310,20 @@ find_skill_dir() {
     fi
 
     _sorted=$(rank_matches "$_root" "$_matches")
+    pick_skill_match "$_root" "$_name" "$_count" "$_sorted"
+}
+
+# pick_skill_match <root> <name> <count> <sorted_matches>
+# Disambiguator for find_skill_dir when there is more than one match.
+# When stdin is a TTY it prompts via prompt_user_for_match; when
+# stdin is NOT a TTY it logs the matches and exits 5 so non-
+# interactive callers (CI, scripts) are forced to disambiguate
+# explicitly. Echoes the selected match on stdout.
+pick_skill_match() {
+    _root=$1
+    _name=$2
+    _count=$3
+    _sorted=$4
 
     if [ ! -t 0 ]; then
         log "error: $_count skills named '$_name' found; \

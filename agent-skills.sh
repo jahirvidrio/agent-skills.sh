@@ -327,7 +327,7 @@ discover_matches() {
 
     _matches=$(find "$_root" \
         -path "*/$_name/SKILL.md" \
-        -not -path "*/.git/*" \
+        ! -path "*/.git/*" \
         -exec dirname {} +)
     if [ -z "$_matches" ]; then
         die 3 "error: skill '$_name' not found \

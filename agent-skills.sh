@@ -63,6 +63,11 @@ print_banner() {
 EOF
 }
 
+die() {
+    log "$2"
+    exit "$1"
+}
+
 # prompt_choice <prompt> <max>
 # Reads a line from stdin, validates it is an integer in [1, max], echoes
 # the chosen number on stdout. Exits 1 on EOF or after 3 invalid attempts.
@@ -77,8 +82,7 @@ prompt_choice() {
         printf '%s' "$_pc_prompt" >&2
         if ! IFS= read -r _pc_answer; then
             printf '\n' >&2
-            log "error: no input received"
-            exit 1
+            die 1 "error: no input received"
         fi
 
         case $_pc_answer in
@@ -101,8 +105,7 @@ prompt_choice() {
         log "  out of range: enter 1-$_pc_max"
     done
 
-    log "error: too many invalid attempts"
-    exit 1
+    die 1 "error: too many invalid attempts"
 }
 
 # ---- Help ------------------------------------------------------------------
@@ -129,131 +132,116 @@ usage() {
 # ---- Argument validation ---------------------------------------------------
 
 # parse_repo_arg <arg>
-# Resolves the repo argument into a clonable URL and a cache subpath
-# (owner/repo). On success, sets globals REPO_URL and CACHE_SUBPATH.
-# On failure, exits with code 2.
+# Resolves the repo argument into a clonable URL and a filesystem cache
+# key. On success, sets globals REPO_URL and CACHE_KEY. On failure,
+# dies with code 2.
 parse_repo_arg() {
     _arg=$1
 
     case $_arg in
         '')
-            log "error: repo argument is empty"
-            exit 2
+            die 2 "error: repo argument is empty"
             ;;
-        # SSH form: git@host:owner/repo[.git]
-        git@*)
-            _rest=${_arg#*:}
-            _path=${_rest%.git}
-            _path=${_path#/}
-            case $_path in
-                */*)
-                    REPO_URL=$_arg
-                    CACHE_SUBPATH=$_path
-                    ;;
-                *)
-                    log "error: cannot extract owner/repo from '$_arg'"
-                    exit 2
-                    ;;
-            esac
-            ;;
-        # SSH form with protocol: ssh://[user@]host[:port]/owner/repo[.git]
-        ssh://*)
-            _rest=${_arg#ssh://}
-            _path=${_rest#*/}
-            _path=${_path%.git}
-            _path=${_path#/}
-            case $_path in
-                */*)
-                    REPO_URL=$_arg
-                    CACHE_SUBPATH=$_path
-                    ;;
-                *)
-                    log "error: cannot extract owner/repo from '$_arg'"
-                    exit 2
-                    ;;
-            esac
-            ;;
-        # HTTPS / HTTP form
-        https://*|http://*)
-            _path=${_arg#*://}
-            _path=${_path#*/}
-            _path=${_path%.git}
-            case $_path in
-                */*)
-                    REPO_URL=$_arg
-                    CACHE_SUBPATH=$_path
-                    ;;
-                *)
-                    log "error: cannot extract owner/repo from '$_arg'"
-                    exit 2
-                    ;;
-            esac
-            ;;
-        # file:// form (useful for local testing/debugging). Cache key is
-        # derived from the path's basename so different paths still cache
-        # separately.
-        file://*)
-            _path=${_arg#file://}
-            _path=${_path%.git}
-            _base=${_path##*/}
-            if [ -z "$_base" ] || [ "$_path" = "$_base" ]; then
-                log "error: cannot extract repo name from '$_arg'"
-                exit 2
-            fi
-            REPO_URL=$_arg
-            CACHE_SUBPATH="local/$_base"
+        git@*|ssh://*|https://*|http://*|file://*)
+            _pfx=$(extract_owner_repo_from_url "$_arg")
+            REPO_URL=$(printf '%s\n' "$_pfx" | sed -n '1p')
+            CACHE_KEY=$(printf '%s\n' "$_pfx" | sed -n '2p')
             ;;
         # Short form: owner/repo (exactly one slash, no protocol, no colon)
         */*)
             case $_arg in
                 *:*)
-                    log "error: invalid repo '$_arg' (URLs need a protocol)"
-                    exit 2
+                    die 2 "error: invalid repo '$_arg' (URLs need a protocol)"
                     ;;
                 */*/*)
-                    log "error: invalid repo '$_arg' \
-(use a full URL for nested paths)"
-                    exit 2
+                    die 2 "error: invalid repo '$_arg' (use a full URL for nested paths)"
                     ;;
                 *)
                     REPO_URL="https://github.com/${_arg}.git"
-                    CACHE_SUBPATH=$_arg
+                    CACHE_KEY=$_arg
                     ;;
             esac
             ;;
         *)
-            log "error: invalid repo '$_arg' \
-(expected owner/repo or a full URL)"
-            exit 2
+            die 2 "error: invalid repo '$_arg' (expected owner/repo or a full URL)"
+            ;;
+    esac
+}
+
+# extract_owner_repo_from_url <url>
+# Resolves a full git URL into "<url>\n<cache-key>" on stdout. The cache
+# key is owner/repo (or local/REPO for file://) — usable as a path
+# segment under the cache root. Dies with code 2 on a malformed URL.
+extract_owner_repo_from_url() {
+    _url=$1
+
+    case $_url in
+        # SSH form: git@host:owner/repo[.git]
+        git@*)
+            _path=${_url#*:}
+            _path=${_path%.git}
+            _path=${_path#/}
+            ;;
+        # SSH form with protocol: ssh://[user@]host[:port]/owner/repo[.git]
+        ssh://*)
+            _path=${_url#ssh://}
+            _path=${_path#*/}
+            _path=${_path%.git}
+            _path=${_path#/}
+            ;;
+        # HTTPS / HTTP form
+        https://*|http://*)
+            _path=${_url#*://}
+            _path=${_path#*/}
+            _path=${_path%.git}
+            ;;
+        # file:// form (useful for local testing/debugging). Cache key
+        # uses the path basename so different paths cache separately.
+        file://*)
+            _path=${_url#file://}
+            _path=${_path%.git}
+            _base=${_path##*/}
+            if [ -z "$_base" ] || [ "$_path" = "$_base" ]; then
+                die 2 "error: cannot extract repo name from '$_url'"
+            fi
+            printf '%s\n%s\n' "$_url" "local/$_base"
+            return 0
+            ;;
+        *)
+            die 2 "error: cannot extract owner/repo from '$_url'"
+            ;;
+    esac
+
+    case $_path in
+        */*)
+            printf '%s\n%s\n' "$_url" "$_path"
+            ;;
+        *)
+            die 2 "error: cannot extract owner/repo from '$_url'"
             ;;
     esac
 }
 
 # validate_skill_name <name>
-# Exits with code 2 on invalid input. Accepted: [A-Za-z0-9._-], no leading
-# dot, no path separators.
+# Dies with code 2 on invalid input. Accepted: [A-Za-z0-9._-], no
+# leading dot, no path separators.
 validate_skill_name() {
     _name=$1
 
     case $_name in
         '')
-            log "error: skill name is empty"
-            exit 2
+            die 2 "error: skill name is empty"
             ;;
         .*)
-            log "error: invalid skill name '$_name' (cannot start with a dot)"
-            exit 2
+            die 2 "error: invalid skill name '$_name' (cannot start with a dot)"
             ;;
         */*)
-            log "error: invalid skill name '$_name' (no path separators allowed)"
-            exit 2
+            die 2 "error: invalid skill name '$_name' (no path separators allowed)"
             ;;
         *)
             case $_name in
                 *[!A-Za-z0-9._-]*)
-                    log "error: invalid skill name '$_name' \
-(only [A-Za-z0-9._-] allowed)"
-                    exit 2
+                    die 2 "error: invalid skill name '$_name' (only [A-Za-z0-9._-] allowed)"
                     ;;
             esac
             ;;
@@ -273,8 +261,7 @@ clone_or_update() {
         if [ -d "$_cache_dir/.git" ]; then
             log "Updating cache: $_cache_dir"
             if ! git -C "$_cache_dir" pull --depth=1; then
-                log "error: git pull failed for $_cache_dir"
-                exit 4
+                die 4 "error: git pull failed for $_cache_dir"
             fi
             return 0
         fi
@@ -285,8 +272,7 @@ clone_or_update() {
 
     log "Cloning $_url"
     if ! mkdir -p -- "$_cache_dir"; then
-        log "error: cannot create cache dir '$_cache_dir'"
-        exit 1
+        die 1 "error: cannot create cache dir '$_cache_dir'"
     fi
 
     _co_partial=$_cache_dir
@@ -295,8 +281,7 @@ clone_or_update() {
     if ! git clone --depth=1 "$_url" "$_cache_dir"; then
         trap - EXIT INT TERM
         rm -rf -- "$_cache_dir"
-        log "error: git clone failed for $_url"
-        exit 4
+        die 4 "error: git clone failed for $_url"
     fi
 
     trap - EXIT INT TERM
@@ -312,23 +297,13 @@ clone_or_update() {
 #               If stdin is NOT a TTY (pipe, redirect, /dev/null), fails
 #               with exit 5 so non-interactive callers (CI, scripts) are
 #               forced to disambiguate explicitly.
-# Exits 3 if nothing matches; exits 5 if ambiguous in non-interactive
-# mode; exits 1 on EOF or too many invalid attempts in interactive mode.
+# Dies 3 if nothing matches; exits 5 if ambiguous in non-interactive
+# mode; dies 1 on EOF or too many invalid attempts in interactive mode.
 find_skill_dir() {
     _root=$1
     _name=$2
 
-    _matches=$(find "$_root" \
-        -path "*/$_name/SKILL.md" \
-        -not -path "*/.git/*" \
-        -exec dirname {} +)
-
-    if [ -z "$_matches" ]; then
-        log "error: skill '$_name' not found \
-(no directory named '$_name' containing SKILL.md under $_root)"
-        exit 3
-    fi
-
+    _matches=$(discover_matches "$_root" "$_name")
     _count=$(printf '%s\n' "$_matches" | awk 'END{print NR}')
 
     if [ "$_count" -eq 1 ]; then
@@ -336,27 +311,7 @@ find_skill_dir() {
         return 0
     fi
 
-    # Multiple matches: rank by canonical-location priority, then
-    # alphabetically within each bucket. Lower priority number = earlier.
-    #   1) .agents/    2) .opencode/    3) .claude/    4) skills/    5) other
-    # Use substr() instead of sub() so cache paths containing regex
-    # metacharacters don't break ranking.
-    _plen=${#_root}
-    _sorted=$(printf '%s\n' "$_matches" | awk -v plen="$_plen" '
-        {
-            rel = substr($0, plen + 2)
-            first = rel
-            sub("/.*", "", first)
-            pri = 5
-            if (first == ".agents")   pri = 1
-            else if (first == ".opencode") pri = 2
-            else if (first == ".claude")   pri = 3
-            else if (first == "skills")    pri = 4
-            printf "%d\t%s\n", pri, $0
-        }' | sort -k1,1n | cut -f2-) || {
-        log "error: ranking pipeline failed"
-        exit 1
-    }
+    _sorted=$(rank_matches "$_root" "$_matches")
 
     if [ ! -t 0 ]; then
         log "error: $_count skills named '$_name' found; \
@@ -367,12 +322,65 @@ cannot prompt (stdin is not a TTY)"
         done <<EOF
 $_sorted
 EOF
-        log "  re-run with a more specific skill name, or pick one of \
-the above paths manually"
+        log "  re-run with a more specific skill name, or pick one of the above paths manually"
         exit 5
     fi
 
-    # Interactive: present a numbered list and prompt.
+    prompt_user_for_match "$_root" "$_name" "$_count" "$_sorted"
+}
+
+# discover_matches <root> <name>
+# Echoes newline-separated paths to dirs named <name> that directly
+# contain SKILL.md under <root>, excluding the .git tree. Dies with
+# code 3 if nothing matches.
+discover_matches() {
+    _root=$1
+    _name=$2
+
+    _matches=$(find "$_root" \
+        -path "*/$_name/SKILL.md" \
+        -not -path "*/.git/*" \
+        -exec dirname {} +)
+    if [ -z "$_matches" ]; then
+        die 3 "error: skill '$_name' not found \
+(no directory named '$_name' containing SKILL.md under $_root)"
+    fi
+    printf '%s\n' "$_matches"
+}
+
+# rank_matches <root> <matches>
+# Sorts <matches> by canonical-location priority, then alphabetically
+# within each bucket:
+#   1) .agents/    2) .opencode/    3) .claude/    4) skills/    5) other
+# Echoes the sorted list on stdout. Dies with code 1 on pipeline failure.
+# Uses substr() instead of sub() so cache paths containing regex
+# metacharacters don't break ranking.
+rank_matches() {
+    _root=$1
+    _plen=${#_root}
+    printf '%s\n' "$2" | awk -v plen="$_plen" '
+        {
+            rel = substr($0, plen + 2)
+            first = rel
+            sub("/.*", "", first)
+            pri = 5
+            if (first == ".agents")   pri = 1
+            else if (first == ".opencode") pri = 2
+            else if (first == ".claude")   pri = 3
+            else if (first == "skills")    pri = 4
+            printf "%d\t%s\n", pri, $0
+        }' | sort -k1,1n | cut -f2- || die 1 "error: ranking pipeline failed"
+}
+
+# prompt_user_for_match <root> <name> <count> <sorted_matches>
+# Interactive: prints a numbered list and reads a choice. Echoes the
+# selected match on stdout.
+prompt_user_for_match() {
+    _root=$1
+    _name=$2
+    _count=$3
+    _sorted=$4
+
     log "Found $_count matches for '$_name':"
     _i=0
     while IFS= read -r _path; do
@@ -387,7 +395,6 @@ EOF
     _selected=$(printf '%s\n' "$_sorted" | sed -n "${_choice}p")
     log "Selected: ${_selected#"$_root"/}"
     printf '%s\n' "$_selected"
-    return 0
 }
 
 # ---- Copy ------------------------------------------------------------------
@@ -404,22 +411,19 @@ copy_skill() {
     if [ ! -d "$_dest_parent" ]; then
         log "Creating destination directory: $_dest_parent"
         if ! mkdir -p -- "$_dest_parent"; then
-            log "error: cannot create destination '$_dest_parent'"
-            exit 1
+            die 1 "error: cannot create destination '$_dest_parent'"
         fi
     fi
 
     if [ -e "$_dest" ]; then
         log "Removing existing $_dest"
         if ! rm -rf -- "$_dest"; then
-            log "error: cannot remove existing '$_dest'"
-            exit 1
+            die 1 "error: cannot remove existing '$_dest'"
         fi
     fi
 
     if ! cp -Rp -- "$_src" "$_dest"; then
-        log "error: copy failed: $_src -> $_dest"
-        exit 1
+        die 1 "error: copy failed: $_src -> $_dest"
     fi
 
     # Defensive: strip any .git that may have leaked (shouldn't happen for
@@ -453,7 +457,7 @@ main() {
     validate_skill_name "$SKILL_NAME"
     parse_repo_arg "$REPO_ARG"
 
-    CACHE_DIR="${CACHE_ROOT%/}/$CACHE_SUBPATH"
+    CACHE_DIR="${CACHE_ROOT%/}/$CACHE_KEY"
 
     log "repo:     $REPO_URL"
     log "skill:    $SKILL_NAME"

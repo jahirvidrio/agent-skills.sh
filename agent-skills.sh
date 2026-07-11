@@ -377,14 +377,18 @@ discover_matches() {
     _root=$1
     _name=$2
 
-    _matches=$(find "$_root" \
-        -path "*/$_name/SKILL.md" \
-        ! -path "*/.git/*" \
-        -exec dirname {} +)
+    _matches=$(
+        find "$_root" \
+            -type d -name ".git" -prune -o \
+            -path "*/$_name/SKILL.md" \
+            -exec dirname {} +
+    )
+
     if [ -z "$_matches" ]; then
         die 3 "error: skill '$_name' not found \
 (no directory named '$_name' containing SKILL.md under $_root)"
     fi
+
     printf '%s\n' "$_matches"
 }
 

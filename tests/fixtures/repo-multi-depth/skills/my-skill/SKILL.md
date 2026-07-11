@@ -1,0 +1,1 @@
+# my-skill (bucket 2, depth 1 — skills/<skill> at cache root)

@@ -25,7 +25,39 @@ agent-skills.sh https://github.com/owner/repo.git my-skill /tmp/skills
 agent-skills.sh git@github.com:owner/repo.git my-skill ./skills
 ```
 
-When multiple directories named `<skill-name>` are found, the script sorts them by canonical-location priority (`.agents` > `.opencode` > `.claude` > `skills` > other, then alphabetically) and prompts with a numbered list (TTY only). In non-interactive contexts the script fails with exit code `5` and lists all matches.
+When multiple directories named `<skill-name>` are found, the script applies the **5-bucket rule** to classify each match into one of 5 buckets by path shape and sorts them by bucket priority (then depth asc, then path asc). Buckets (highest to lowest priority):
+
+1. `.X/skills/<skill>` — a dotfile-prefixed directory containing a `skills` subdirectory that directly holds the skill (depth 2).
+2. `skills/<skill>` — a top-level `skills` directory holding the skill (depth 1).
+3. `<skill>` — the skill is a direct child of the cache root (depth 0).
+4. `.X/<...>/<skill>` — any other path under a dotfile-prefixed directory.
+5. `<...>/<skill>` — any other path.
+
+Bucket priority is absolute: a bucket 1 match wins over a bucket 5 match even when bucket 1 has higher depth. Within a bucket, ties are broken by depth (lower first), then alphabetically (under `LC_ALL=C`).
+
+In interactive contexts (TTY), the script prompts with a numbered list. In non-interactive contexts (stdin is not a TTY), it fails with exit code `5` and lists all matches.
+
+#### Ranking example
+
+Given these 6 paths under the cache root:
+
+```
+.claude/skills/my-skill/SKILL.md              → bucket 1, depth 2
+.opencode/skills/my-skill/SKILL.md            → bucket 1, depth 2
+skills/my-skill/SKILL.md                      → bucket 2, depth 1
+my-skill/SKILL.md                             → bucket 3, depth 0
+.agents/community/skills/my-skill/SKILL.md    → bucket 4, depth 3
+community/python/skills/my-skill/SKILL.md     → bucket 5, depth 3
+```
+
+The script ranks them in this order:
+
+1. `.claude/skills/my-skill` (bucket 1, alphabetical tiebreak)
+2. `.opencode/skills/my-skill` (bucket 1)
+3. `skills/my-skill` (bucket 2)
+4. `my-skill` (bucket 3)
+5. `.agents/community/skills/my-skill` (bucket 4 — note: `community` between `.agents` and `skills` puts this in bucket 4, not bucket 1)
+6. `community/python/skills/my-skill` (bucket 5)
 
 ### Exit codes
 

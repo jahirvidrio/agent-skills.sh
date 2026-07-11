@@ -1,0 +1,1 @@
+# my-skill (bucket 5, depth 3 — non-dotdir path)

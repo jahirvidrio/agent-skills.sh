@@ -1,3 +1,3 @@
-# my-skill (in .agents/ — highest priority)
+# my-skill (bucket-4 alphabetical-first legacy fixture)
 
 Canonical location.

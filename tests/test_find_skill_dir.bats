@@ -31,7 +31,7 @@ load 'lib/test_helper'
     [[ "$output" == *"skills named 'my-skill' found"* ]]
 }
 
-@test "multiple matches are listed in priority order (.agents first)" {
+@test "multiple matches are listed in bucket-4 alphabetical order (.agents first)" {
     FIXTURE=$(fixture_path repo-multi)
     prepopulate_cache "local/repo-multi" "$FIXTURE"
     setup_fake_git
@@ -39,7 +39,7 @@ load 'lib/test_helper'
     run_script "file://$FIXTURE" "my-skill" "$BATS_TEST_TMPDIR/dest"
 
     [ "$status" -eq 5 ]
-    # .agents must appear before .opencode in the match list
+    # .agents must appear before .opencode in the match list (bucket-4 path asc)
     _agents_pos=$(printf '%s' "$output" | grep -bo '\.agents/my-skill' | head -1 | cut -d: -f1)
     _opencode_pos=$(printf '%s' "$output" | grep -bo '\.opencode/my-skill' | head -1 | cut -d: -f1)
     [ -n "$_agents_pos" ]
@@ -73,4 +73,31 @@ load 'lib/test_helper'
     [ "$status" -eq 0 ]
     [ -f "$DEST/my-skill/SKILL.md" ]
     [[ "$(cat "$DEST/my-skill/SKILL.md")" == *"from .agents"* ]]
+}
+
+@test "repo-multi-depth: 5-bucket rule orders all 6 paths exactly" {
+    FIXTURE=$(fixture_path repo-multi-depth)
+    prepopulate_cache "local/repo-multi-depth" "$FIXTURE"
+    setup_fake_git
+
+    run_script "file://$FIXTURE" "my-skill" "$BATS_TEST_TMPDIR/dest"
+
+    [ "$status" -eq 5 ]
+
+    match_pos() {
+        printf '%s' "$output" | grep -bo "$1" | head -1 | cut -d: -f1
+    }
+
+    pos_a=$(match_pos '\.claude/skills/my-skill')
+    pos_b=$(match_pos '\.opencode/skills/my-skill')
+    pos_c=$(match_pos ' skills/my-skill')
+    pos_d=$(match_pos ' my-skill')
+    pos_e=$(match_pos '\.agents/community/skills/my-skill')
+    pos_f=$(match_pos 'community/python/skills/my-skill')
+
+    [ -n "$pos_a" ] && [ -n "$pos_b" ] && [ -n "$pos_c" ]
+    [ -n "$pos_d" ] && [ -n "$pos_e" ] && [ -n "$pos_f" ]
+    [ "$pos_a" -lt "$pos_b" ] && [ "$pos_b" -lt "$pos_c" ]
+    [ "$pos_c" -lt "$pos_d" ] && [ "$pos_d" -lt "$pos_e" ]
+    [ "$pos_e" -lt "$pos_f" ]
 }

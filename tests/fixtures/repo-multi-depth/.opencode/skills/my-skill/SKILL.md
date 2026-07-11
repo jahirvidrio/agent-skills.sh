@@ -1,0 +1,1 @@
+# my-skill (bucket 1, depth 2 — .X/skills/<skill>)

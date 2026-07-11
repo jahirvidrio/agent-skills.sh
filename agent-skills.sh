@@ -389,27 +389,42 @@ discover_matches() {
 }
 
 # rank_matches <root> <matches>
-# Sorts <matches> by canonical-location priority, then alphabetically
-# within each bucket:
-#   1) .agents/    2) .opencode/    3) .claude/    4) skills/    5) other
-# Echoes the sorted list on stdout. Dies with code 1 on pipeline failure.
-# Uses substr() instead of sub() so cache paths containing regex
-# metacharacters don't break ranking.
+# Sort match dirs by relative path shape.
+# B1: .X/skills/<skill>; depth 2; parent .X/skills exactly.
+# B2: skills/<skill>; depth 1; parent skills exactly.
+# B3: <skill> at root; depth 0.
+# B4: dotdir paths not in B1.
+# B5: other non-dotdir paths.
+# Bucket beats depth; then depth, then LC_ALL=C path.
+# Awk emits bucket<TAB>depth<TAB>path; sort cuts keys.
+# substr() keeps cache-root regex chars inert.
 rank_matches() {
-    _root=$1
+    _root=${1%/}
     _plen=${#_root}
+    _tab=$(printf '\t') # Safe POSIX tab char delimiter for sort and cut
+
     printf '%s\n' "$2" | awk -v plen="$_plen" '
-        {
-            rel = substr($0, plen + 2)
-            first = rel
-            sub("/.*", "", first)
-            pri = 5
-            if (first == ".agents")   pri = 1
-            else if (first == ".opencode") pri = 2
-            else if (first == ".claude")   pri = 3
-            else if (first == "skills")    pri = 4
-            printf "%d\t%s\n", pri, $0
-        }' | sort -k1,1n | cut -f2- || die 1 "error: ranking pipeline failed"
+    {
+        rel = substr($0, plen + 2)
+        depth = gsub("/", "/", rel)
+        first = rel; sub("/.*", "", first)
+        parent = rel
+
+        if (depth == 0) parent = ""
+        else sub("/[^/]*$", "", parent)
+
+        dot = (substr(first, 1, 1) == ".")
+        bucket = 5
+
+        if (dot && depth == 2 && parent == first "/skills") bucket = 1
+        else if (!dot && depth == 1 && parent == "skills") bucket = 2
+        else if (depth == 0) bucket = 3
+        else if (dot) bucket = 4
+
+        printf "%d\t%d\t%s\n", bucket, depth, $0
+    }' | LC_ALL=C sort -t "$_tab" -k1,1n -k2,2n -k3 | cut -d "$_tab" -f3- || {
+        die 1 "error: ranking pipeline failed"
+    }
 }
 
 # prompt_user_for_match <root> <name> <count> <sorted_matches>

@@ -1,0 +1,1 @@
+# my-skill (bucket 4, depth 3 — dotdir path not in bucket 1)

@@ -20,9 +20,9 @@ The script clones `<repo>` (cached at `~/.cache/agent-skills/<owner>/<repo>` and
 ### Examples
 
 ```
-agent-skills.sh sickn33/agentic-awesome-skills my-skill ./skills
-agent-skills.sh https://github.com/owner/repo.git my-skill /tmp/skills
-agent-skills.sh git@github.com:owner/repo.git my-skill ./skills
+agent-skills.sh owner/repo my-skill .agents/skills
+agent-skills.sh https://github.com/owner/repo.git my-skill .agents/skills
+agent-skills.sh git@github.com:owner/repo.git my-skill .agents/skills
 ```
 
 When multiple directories named `<skill-name>` are found, the script applies the **5-bucket rule** to classify each match into one of 5 buckets by path shape and sorts them by bucket priority (then depth asc, then path asc). Buckets (highest to lowest priority):

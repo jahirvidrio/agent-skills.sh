@@ -42,7 +42,7 @@ load 'lib/test_helper'
 }
 
 @test "too many arguments prints usage and exits 2" {
-    run_script owner/repo my-skill ./dest extra
+    run_script owner/repo my-skill .agents/skills extra
     [ "$status" -eq 2 ]
     [[ "$output" == *"Usage:"* ]]
 }
@@ -92,7 +92,7 @@ load 'lib/test_helper'
 }
 
 @test "unknown flag exits 2" {
-    run_script --no-such-flag owner/repo my-skill ./dest
+    run_script --no-such-flag owner/repo my-skill .agents/skills
     [ "$status" -eq 2 ]
     [[ "$output" == *"unknown flag"* ]]
 }

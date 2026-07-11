@@ -127,10 +127,10 @@ Exit codes:
      stdin is not a TTY so the script cannot ask which one to use)
 
 Examples:
-  agent-skills.sh sickn33/agentic-awesome-skills my-skill ./skills
-  agent-skills.sh https://github.com/owner/repo.git my-skill /tmp/skills
-  agent-skills.sh git@github.com:owner/repo.git my-skill ./skills
-  agent-skills.sh --no-banner owner/repo my-skill ./skills
+  agent-skills.sh owner/repo my-skill .agents/skills
+  agent-skills.sh https://github.com/owner/repo.git my-skill .agents/skills
+  agent-skills.sh git@github.com:owner/repo.git my-skill .agents/skills
+  agent-skills.sh --no-banner owner/repo my-skill .agents/skills
 EOF
     exit "${1:-0}"
 }

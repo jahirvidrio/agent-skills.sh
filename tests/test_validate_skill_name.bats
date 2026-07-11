@@ -12,30 +12,30 @@ load 'lib/test_helper'
     # invoke via env-var trickery: invoke with a placeholder then
     # verify the script's own validation hits a different code.
     # Instead, use a clearly-invalid name to exercise the path.
-    run_script owner/repo "" /tmp/dest
+    run_script owner/repo "" .agents/skills
     [ "$status" -eq 2 ]
 }
 
 @test "skill name starting with a dot exits 2" {
-    run_script_with_fake_git owner/repo ".hidden" /tmp/dest
+    run_script_with_fake_git owner/repo ".hidden" .agents/skills
     [ "$status" -eq 2 ]
     [[ "$output" == *"cannot start with a dot"* ]]
 }
 
 @test "skill name with a slash exits 2" {
-    run_script_with_fake_git owner/repo "bad/name" /tmp/dest
+    run_script_with_fake_git owner/repo "bad/name" .agents/skills
     [ "$status" -eq 2 ]
     [[ "$output" == *"no path separators"* ]]
 }
 
 @test "skill name with disallowed characters exits 2" {
-    run_script_with_fake_git owner/repo 'bad name!' /tmp/dest
+    run_script_with_fake_git owner/repo 'bad name!' .agents/skills
     [ "$status" -eq 2 ]
     [[ "$output" == *"only [A-Za-z0-9._-] allowed"* ]]
 }
 
 @test "skill name with shell metacharacters exits 2" {
-    run_script_with_fake_git owner/repo 'bad;name' /tmp/dest
+    run_script_with_fake_git owner/repo 'bad;name' .agents/skills
     [ "$status" -eq 2 ]
     [[ "$output" == *"only [A-Za-z0-9._-] allowed"* ]]
 }
@@ -45,24 +45,24 @@ load 'lib/test_helper'
     # which fails with exit 3 because there is no SKILL.md under the
     # (empty) cache dir. The point of this test is to prove validation
     # accepted the name -- exit 3 != 2 means validation passed.
-    run_script_with_fake_git owner/repo valid-name /tmp/dest
+    run_script_with_fake_git owner/repo valid-name .agents/skills
     [ "$status" -eq 3 ]
 }
 
 @test "skill name with dots and hyphens in the middle is valid" {
-    run_script_with_fake_git owner/repo "my.skill-v2" /tmp/dest
+    run_script_with_fake_git owner/repo "my.skill-v2" .agents/skills
     [ "$status" -eq 3 ]
 }
 
 @test "skill name longer than 100 chars exits 2" {
     LONG=$(printf 'a%.0s' {1..101})
-    run_script_with_fake_git owner/repo "$LONG" /tmp/dest
+    run_script_with_fake_git owner/repo "$LONG" .agents/skills
     [ "$status" -eq 2 ]
     [[ "$output" == *"longer than 100 chars"* ]]
 }
 
 @test "skill name exactly 100 chars is accepted" {
     EXACT=$(printf 'a%.0s' {1..100})
-    run_script_with_fake_git owner/repo "$EXACT" /tmp/dest
+    run_script_with_fake_git owner/repo "$EXACT" .agents/skills
     [ "$status" -eq 3 ]
 }

@@ -6,7 +6,7 @@ set -eu
 
 # ---- Configuration ---------------------------------------------------------
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 CACHE_ROOT="${HOME:?HOME must be set}/.cache/agent-skills"
 
 # ---- Prerequisites ---------------------------------------------------------

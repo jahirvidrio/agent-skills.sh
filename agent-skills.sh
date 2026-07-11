@@ -265,6 +265,59 @@ validate_skill_name() {
 
 # ---- Git operations --------------------------------------------------------
 
+# _canonicalize_url <url>
+# Echoes the canonical form of <url>. Rules:
+# trim trailing whitespace, strip trailing .git, lowercase host only.
+_canonicalize_url() {
+    _cu_url=$1
+
+    # Trim trailing whitespace (POSIX sed; one-liner).
+    _cu_url=$(printf '%s' "$_cu_url" | sed 's/[[:space:]]*$//')
+    # Strip trailing .git (no-op if not present).
+    _cu_url=${_cu_url%.git}
+
+    # Lowercase the host portion only.
+    case $_cu_url in
+        *://*)
+            _cu_scheme=${_cu_url%%://*}
+            _cu_rest=${_cu_url#*://}
+            case $_cu_rest in
+                *@*) _cu_at="${_cu_rest%%@*}@"; _cu_hp=${_cu_rest#*@} ;;
+                *)   _cu_at=""; _cu_hp=$_cu_rest ;;
+            esac
+            case $_cu_hp in
+                */*) _cu_host=${_cu_hp%%/*}; _cu_path=/${_cu_hp#*/} ;;
+                *)   _cu_host=$_cu_hp; _cu_path="" ;;
+            esac
+            _cu_lc=$(printf '%s' "$_cu_host" | tr 'A-Z' 'a-z')
+            printf '%s://%s%s%s' "$_cu_scheme" "$_cu_at" "$_cu_lc" "$_cu_path"
+            ;;
+        *@*:*)
+            _cu_pre=${_cu_url%%@*}
+            _cu_post=${_cu_url#*@}
+            _cu_host=${_cu_post%%:*}
+            _cu_path=${_cu_post#*:}
+            _cu_lc=$(printf '%s' "$_cu_host" | tr 'A-Z' 'a-z')
+            printf '%s@%s:%s' "$_cu_pre" "$_cu_lc" "$_cu_path"
+            ;;
+        *)
+            printf '%s' "$_cu_url"
+            ;;
+    esac
+}
+
+# _origin_matches_cached <cached_origin> <requested_url>
+# Returns 0 if canonicalized forms match, 1 otherwise. No stderr.
+# CALLER MUST wrap in `if`/`while` (set -e would abort on return 1).
+_origin_matches_cached() {
+    _omc_cached=$1
+    _omc_requested=$2
+    _omc_c=$(_canonicalize_url "$_omc_cached")
+    _omc_r=$(_canonicalize_url "$_omc_requested")
+    if [ "$_omc_c" = "$_omc_r" ]; then return 0; fi
+    return 1
+}
+
 # clone_or_update <cache_dir> <url>
 # If <cache_dir>/.git exists, runs git pull --depth=1. Otherwise clones to
 # a temp dir inside the cache parent and moves the result into place.

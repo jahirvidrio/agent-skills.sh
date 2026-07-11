@@ -30,10 +30,29 @@ make_fake_git() {
     mkdir -p "$_dir"
     cat > "$_dir/git" <<'EOF'
 #!/bin/sh
+# Append-only call log under BATS_TEST_TMPDIR; lets tests assert
+# which subcommands were invoked.
+if [ -n "${GIT_CALL_LOG:-}" ]; then
+    printf '%s\n' "$*" >> "$GIT_CALL_LOG"
+fi
+
 if [ "${FAKE_GIT_FAIL:-0}" = "1" ]; then
     printf 'fake-git: forced failure\n' >&2
     exit 1
 fi
+
+# Branch: `git [-C <dir>] remote get-url origin`.
+# Filter -C and its arg; remaining argv is `remote get-url origin`.
+case $* in
+    *"remote"*"get-url"*"origin"*)
+        if [ -n "${FAKE_GIT_ORIGIN:-}" ]; then
+            printf '%s\n' "$FAKE_GIT_ORIGIN"
+            exit 0
+        fi
+        printf 'fake-git: no origin configured\n' >&2
+        exit 1
+        ;;
+esac
 
 if [ "$1" = "clone" ]; then
     shift
@@ -73,6 +92,8 @@ setup_fake_git() {
     _bin=$BATS_TEST_TMPDIR/fakebin
     make_fake_git "$_bin"
     export PATH="$_bin:$PATH"
+    export GIT_CALL_LOG="$BATS_TEST_TMPDIR/git-calls.log"
+    : > "$GIT_CALL_LOG"
 }
 
 # cache_root

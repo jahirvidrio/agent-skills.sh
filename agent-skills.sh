@@ -318,9 +318,7 @@ _origin_matches_cached() {
     return 1
 }
 
-# clone_or_update <cache_dir> <url>
-# If <cache_dir>/.git exists, runs git pull --depth=1. Otherwise clones to
-# a temp dir inside the cache parent and moves the result into place.
+# clone_or_update <cache_dir> <url>: pulls on cache hit, clones on miss.
 clone_or_update() {
     _cache_dir=$1
     _url=$2
@@ -328,14 +326,20 @@ clone_or_update() {
     if [ -d "$_cache_dir" ]; then
         if [ -d "$_cache_dir/.git" ]; then
             log "Updating cache: $_cache_dir"
-            if ! git -C "$_cache_dir" pull --depth=1; then
-                die 4 "error: git pull failed for $_cache_dir"
+            # Verify cached origin matches requested URL before pulling.
+            if _cached=$(git -C "$_cache_dir" remote get-url origin 2>/dev/null) \
+                && _origin_matches_cached "$_cached" "$_url"; then
+                if ! git -C "$_cache_dir" pull --depth=1; then
+                    die 4 "error: git pull failed for $_cache_dir"
+                fi
+                return 0
             fi
-            return 0
+            rm -rf -- "$_cache_dir"
+        else
+            log "error: cache dir '$_cache_dir' exists but is not a git repo"
+            log "       remove it manually to continue"
+            exit 4
         fi
-        log "error: cache dir '$_cache_dir' exists but is not a git repo"
-        log "       remove it manually to continue"
-        exit 4
     fi
 
     log "Cloning $_url"

@@ -55,3 +55,78 @@ load 'lib/test_helper'
     [[ "$output" == *"git clone failed"* ]]
     [ ! -d "$(cache_root)/local/repo-single" ]
 }
+
+setup() {
+    setup_fake_git
+    : > "${GIT_CALL_LOG:-/dev/null}"
+}
+
+@test "match path: cached origin matches requested URL -> pull runs, no clone" {
+    FIXTURE=$(fixture_path repo-single)
+    DEST="$BATS_TEST_TMPDIR/dest"
+    export FAKE_GIT_ORIGIN="file://$FIXTURE"
+    prepopulate_cache "local/repo-single" "$FIXTURE"
+
+    run_script "file://$FIXTURE" "my-skill" "$DEST"
+
+    [ "$status" -eq 0 ]
+    [ -f "$DEST/my-skill/SKILL.md" ]
+    grep -q "pull --depth=1" "$GIT_CALL_LOG"
+    ! grep -q "^clone " "$GIT_CALL_LOG"
+}
+
+@test "mismatch path: cached origin does NOT match -> cache cleared, re-clone runs, exit 0" {
+    FIXTURE=$(fixture_path repo-single)
+    DEST="$BATS_TEST_TMPDIR/dest"
+    export FAKE_GIT_ORIGIN="file:///wrong/host/repo"
+    prepopulate_cache "local/repo-single" "$FIXTURE"
+
+    run_script "file://$FIXTURE" "my-skill" "$DEST"
+
+    [ "$status" -eq 0 ]
+    [ -f "$DEST/my-skill/SKILL.md" ]
+    grep -q "remote get-url origin" "$GIT_CALL_LOG"
+    grep -q "^clone " "$GIT_CALL_LOG"
+}
+
+@test "missing origin: fake git's remote get-url origin exits non-zero -> re-clone runs" {
+    FIXTURE=$(fixture_path repo-single)
+    DEST="$BATS_TEST_TMPDIR/dest"
+    unset FAKE_GIT_ORIGIN
+    prepopulate_cache "local/repo-single" "$FIXTURE"
+
+    run_script "file://$FIXTURE" "my-skill" "$DEST"
+
+    [ "$status" -eq 0 ]
+    [ -f "$DEST/my-skill/SKILL.md" ]
+    grep -q "remote get-url origin" "$GIT_CALL_LOG"
+    grep -q "^clone " "$GIT_CALL_LOG"
+}
+
+@test "cache miss: no cache dir -> no extra remote get-url subshell call" {
+    FIXTURE=$(fixture_path repo-single)
+    DEST="$BATS_TEST_TMPDIR/dest"
+    # Do NOT prepopulate cache.
+    unset FAKE_GIT_ORIGIN
+
+    run_script "file://$FIXTURE" "my-skill" "$DEST"
+
+    [ "$status" -eq 0 ]
+    [ -f "$DEST/my-skill/SKILL.md" ]
+    ! grep -q "remote get-url" "$GIT_CALL_LOG"
+}
+
+@test "no stderr warning on mismatch-triggered re-clone" {
+    FIXTURE=$(fixture_path repo-single)
+    DEST="$BATS_TEST_TMPDIR/dest"
+    export FAKE_GIT_ORIGIN="file:///wrong/host/repo"
+    prepopulate_cache "local/repo-single" "$FIXTURE"
+
+    run_script "file://$FIXTURE" "my-skill" "$DEST"
+
+    [ "$status" -eq 0 ]
+    ! [[ "$output" == *"warning"* ]]
+    ! [[ "$output" == *"mismatch"* ]]
+    ! [[ "$output" == *"reclone"* ]]
+    ! [[ "$output" == *"re-clon"* ]]
+}

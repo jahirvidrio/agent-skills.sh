@@ -297,7 +297,7 @@ _canonicalize_url() {
             _cu_post=${_cu_url#*@}
             _cu_host=${_cu_post%%:*}
             _cu_path=${_cu_post#*:}
-            _cu_lc=$(printf '%s' "$_cu_host" | tr 'A-Z' 'a-z')
+            _cu_lc=$(printf '%s' "$_cu_host" | LC_ALL=C tr '[:upper:]' '[:lower:]')
             printf '%s@%s:%s' "$_cu_pre" "$_cu_lc" "$_cu_path"
             ;;
         *)

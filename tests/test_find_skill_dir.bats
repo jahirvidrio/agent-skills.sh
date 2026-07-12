@@ -66,6 +66,7 @@ load 'lib/test_helper'
     echo "# from git dir" > "$CACHE/.git/objects/SKILL.md"
     echo "# from .agents" > "$CACHE/.agents/my-skill/SKILL.md"
     setup_fake_git
+    export FAKE_GIT_ORIGIN="file:///does/not/matter.git"
     DEST="$BATS_TEST_TMPDIR/dest"
 
     run_script "file:///does/not/matter.git" "my-skill" "$DEST"

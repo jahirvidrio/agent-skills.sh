@@ -184,6 +184,24 @@ extract_owner_repo_from_url() {
     case $_url in
         # SSH form: git@host:owner/repo[.git]
         git@*)
+            # Reject SCP-like URLs with an embedded port (git@host:port:path).
+            # The standard SCP-like form is [user@]host:path and does NOT support
+            # ports; use ssh://user@host:port/path when a port is needed.
+            case $_url in
+                git@*:*:*/*)
+                    _after_at=${_url#git@}
+                    _mid=${_after_at#*:}
+                    case $_mid in
+                        [!0-9]*)
+                            : # fall through to normal handling
+                            ;;
+                        *)
+                            _host=${_after_at%%:*}
+                            die 2 "error: invalid repo '$_url' (git SCP-like URLs cannot embed a port; use ssh://${_host}:PORT/path instead)"
+                            ;;
+                    esac
+                    ;;
+            esac
             _path=${_url#*:}
             _path=${_path%.git}
             _path=${_path#/}

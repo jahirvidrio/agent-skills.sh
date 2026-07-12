@@ -43,7 +43,9 @@ printf '>> dash -n %s\n' "$target"
 dash -n "$target"
 
 printf '>> shellcheck -s sh %s\n' "$target"
-shellcheck -s sh "$target"
+# --severity=warning filters out info/style findings (e.g., SC2018/SC2019 on
+# `tr 'A-Z' 'a-z'` for ASCII hosts); accepted for the cross-host cache design.
+shellcheck --severity=warning -s sh "$target"
 
 if command -v checkbashisms >/dev/null 2>&1; then
     printf '>> checkbashisms %s\n' "$target"

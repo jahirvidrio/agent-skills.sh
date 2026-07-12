@@ -66,6 +66,52 @@ load 'lib/test_helper'
     [[ "$output" == *"cache:    $(cache_root)/owner/repo"* ]]
 }
 
+@test "git@host:port:path is rejected with exit 2" {
+    run_script_with_fake_git "git@github.com:22:owner/repo.git" valid-skill .agents/skills
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"ssh://"* ]]
+    [[ "$output" == *"git@github.com:22:owner/repo.git"* ]]
+}
+
+@test "git@host:port:path without .git suffix is also rejected" {
+    run_script_with_fake_git "git@github.com:22:owner/repo" valid-skill .agents/skills
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"ssh://"* ]]
+}
+
+@test "git@host:port:multi/segment/path is rejected" {
+    run_script_with_fake_git "git@gitlab.example.org:2222:group/sub/proj.git" valid-skill .agents/skills
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"ssh://"* ]]
+}
+
+@test "git@host:non_numeric:rest is NOT rejected as port (path flows through)" {
+    # "abc" is not digits, so the port-leak guard must NOT fire. The resulting
+    # CACHE_KEY is "abc:owner/repo" (it will then fail with exit 3 from
+    # find_skill_dir / no SKILL.md, NOT with exit 2 from the port guard).
+    run_script_with_fake_git "git@github.com:abc:owner/repo" valid-skill .agents/skills
+    [ "$status" -eq 3 ]
+    [[ "$output" == *"cache:    $(cache_root)/abc:owner/repo"* ]]
+}
+
+@test "ssh:// URL with port works (audit test)" {
+    run_script_with_fake_git "ssh://git@github.com:22/owner/repo.git" valid-skill .agents/skills
+    [ "$status" -eq 3 ]
+    [[ "$output" == *"cache:    $(cache_root)/owner/repo"* ]]
+}
+
+@test "https URL with port works (audit test)" {
+    run_script_with_fake_git "https://github.com:8443/owner/repo.git" valid-skill .agents/skills
+    [ "$status" -eq 3 ]
+    [[ "$output" == *"cache:    $(cache_root)/owner/repo"* ]]
+}
+
+@test "http URL with port works (audit test)" {
+    run_script_with_fake_git "http://github.com:8080/owner/repo.git" valid-skill .agents/skills
+    [ "$status" -eq 3 ]
+    [[ "$output" == *"cache:    $(cache_root)/owner/repo"* ]]
+}
+
 @test "file:// URL is preserved and cached under local/<basename>" {
     run_script_with_fake_git file:///tmp/some/local-repo.git valid-skill .agents/skills
     [ "$status" -eq 3 ]

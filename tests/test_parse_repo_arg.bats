@@ -151,3 +151,115 @@ load 'lib/test_helper'
     [ "$status" -eq 2 ]
     [[ "$output" == *"use a full URL for nested paths"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# Empty-host / empty-segment rejection guards
+# ---------------------------------------------------------------------------
+# The guards added in extract_owner_repo_from_url and parse_repo_arg must
+# reject empty or port-only authority across all accepted protocols before
+# the parameter-expansion strips erase the evidence. Each test below pins
+# one input from the audit and asserts exit 2 + arm-specific diagnostic.
+# Pattern mirrors the existing port-leak tests above.
+
+@test "git@:owner/repo is rejected with empty-host diagnostic (scp-like)" {
+    run_script_with_fake_git "git@:owner/repo" my-skill .agents/skills
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"empty host in scp-like url"* ]]
+    [[ "$output" == *"git@:owner/repo"* ]]
+}
+
+@test "ssh:///owner/repo is rejected with empty-host diagnostic" {
+    run_script_with_fake_git "ssh:///owner/repo" my-skill .agents/skills
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"empty host in ssh url"* ]]
+    [[ "$output" == *"ssh:///owner/repo"* ]]
+}
+
+@test "ssh://:PORT/owner/repo is rejected with port-only-host diagnostic" {
+    run_script_with_fake_git "ssh://:22/owner/repo" my-skill .agents/skills
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"port-only host in ssh url"* ]]
+    [[ "$output" == *"ssh://:22/owner/repo"* ]]
+}
+
+@test "ssh://user@/owner/repo is rejected with empty-host-after-user diagnostic" {
+    run_script_with_fake_git "ssh://git@/owner/repo" my-skill .agents/skills
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"empty host after user in ssh url"* ]]
+    [[ "$output" == *"ssh://git@/owner/repo"* ]]
+}
+
+@test "https:///owner/repo is rejected with empty-host diagnostic" {
+    run_script_with_fake_git "https:///owner/repo" my-skill .agents/skills
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"empty host in url"* ]]
+    [[ "$output" == *"https:///owner/repo"* ]]
+}
+
+@test "http:///owner/repo is rejected with empty-host diagnostic" {
+    run_script_with_fake_git "http:///owner/repo" my-skill .agents/skills
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"empty host in url"* ]]
+    [[ "$output" == *"http:///owner/repo"* ]]
+}
+
+@test "https://:PORT/owner/repo is rejected with port-only-host diagnostic" {
+    run_script_with_fake_git "https://:443/owner/repo" my-skill .agents/skills
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"port-only host in url"* ]]
+    [[ "$output" == *"https://:443/owner/repo"* ]]
+}
+
+@test "/ alone is rejected with empty-segment diagnostic" {
+    run_script_with_fake_git "/" my-skill .agents/skills
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"empty owner or repo segment"* ]]
+}
+
+@test "/repo (empty owner) is rejected with empty-segment diagnostic" {
+    run_script_with_fake_git "/repo" my-skill .agents/skills
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"empty owner or repo segment"* ]]
+}
+
+@test "owner/ (empty repo) is rejected with empty-segment diagnostic" {
+    run_script_with_fake_git "owner/" my-skill .agents/skills
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"empty owner or repo segment"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# Lock tests: pin the two deferred scenarios from the audit (obs #565)
+# ---------------------------------------------------------------------------
+
+@test "git@host:owner/sub/proj (multi-segment path) parses successfully" {
+    # Multi-segment SCP-like paths (group/sub/proj) MUST keep working.
+    # Locked here because the existing port-leak guard sits in the same arm.
+    run_script_with_fake_git "git@github.com:owner/sub/proj" valid-skill .agents/skills
+    [ "$status" -eq 3 ]
+    [[ "$output" == *"repo:     git@github.com:owner/sub/proj"* ]]
+    [[ "$output" == *"cache:    $(cache_root)/owner/sub/proj"* ]]
+}
+
+@test "git@host: (missing path) is rejected with cannot-extract diagnostic" {
+    # The trailing */*) fallthrough at the end of extract_owner_repo_from_url
+    # already exits 2 on this input; lock it here so future refactors don't
+    # break the existing normative behavior.
+    run_script_with_fake_git "git@host:" my-skill .agents/skills
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"cannot extract owner/repo from 'git@host:'"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# file:/// non-regression (RFC 8089 permits empty authority)
+# ---------------------------------------------------------------------------
+
+@test "file:///local/path (without .git) is preserved under local/<basename>" {
+    # Sibling to the existing line-115 test (which uses .git suffix). Both
+    # forms MUST keep working; the empty-host guards added above must not
+    # touch the file:// arm.
+    run_script_with_fake_git "file:///tmp/some/local-repo" valid-skill .agents/skills
+    [ "$status" -eq 3 ]
+    [[ "$output" == *"repo:     file:///tmp/some/local-repo"* ]]
+    [[ "$output" == *"cache:    $(cache_root)/local/local-repo"* ]]
+}

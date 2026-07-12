@@ -153,6 +153,14 @@ parse_repo_arg() {
             ;;
         # Short form: owner/repo (exactly one slash, no protocol, no colon)
         */*)
+            # Reject empty owner or repo segments (/, /repo, owner/). Compute
+            # both segments and require each to be non-empty; the existing
+            # */*/* check below still rejects multi-segment paths.
+            _owner=${_arg%/*}
+            _repo=${_arg#*/}
+            if [ -z "$_owner" ] || [ -z "$_repo" ]; then
+                die 2 "error: invalid repo '$_arg' (empty owner or repo segment)"
+            fi
             case $_arg in
                 *:*)
                     die 2 "error: invalid repo '$_arg' (URLs need a protocol)"
@@ -184,6 +192,14 @@ extract_owner_repo_from_url() {
     case $_url in
         # SSH form: git@host:owner/repo[.git]
         git@*)
+            # Reject SCP-like URLs with an empty host (git@:path). The SCP-like
+            # form requires a non-empty host segment between 'git@' and the
+            # first ':'; an empty host collapses to a misleading cache key.
+            case $_url in
+                git@:*)
+                    die 2 "error: invalid repo '$_url' (empty host in scp-like url)"
+                    ;;
+            esac
             # Reject SCP-like URLs with an embedded port (git@host:port:path).
             # The standard SCP-like form is [user@]host:path and does NOT support
             # ports; use ssh://user@host:port/path when a port is needed.
@@ -208,6 +224,20 @@ extract_owner_repo_from_url() {
             ;;
         # SSH form with protocol: ssh://[user@]host[:port]/owner/repo[.git]
         ssh://*)
+            # Reject URLs with empty or port-only authority (ssh:///path,
+            # ssh://user@/path, ssh://:PORT/path). The authority segment
+            # between 'ssh://' and the first '/' must contain a real host.
+            case $_url in
+                ssh:///*)
+                    die 2 "error: invalid repo '$_url' (empty host in ssh url)"
+                    ;;
+                ssh://*@/*)
+                    die 2 "error: invalid repo '$_url' (empty host after user in ssh url)"
+                    ;;
+                ssh://:*)
+                    die 2 "error: invalid repo '$_url' (port-only host in ssh url)"
+                    ;;
+            esac
             _path=${_url#ssh://}
             _path=${_path#*/}
             _path=${_path%.git}
@@ -215,6 +245,21 @@ extract_owner_repo_from_url() {
             ;;
         # HTTPS / HTTP form
         https://*|http://*)
+            # Reject URLs with empty or port-only authority (https:///path,
+            # https://user@/path, https://:PORT/path). Same shape as the ssh://
+            # guard above; per-scheme duplicates because POSIX case patterns
+            # don't support scheme alternation inside a nested case.
+            case $_url in
+                https:///*|http:///*)
+                    die 2 "error: invalid repo '$_url' (empty host in url)"
+                    ;;
+                https://*@/*|http://*@/*)
+                    die 2 "error: invalid repo '$_url' (empty host after user in url)"
+                    ;;
+                https://:*|http://:*)
+                    die 2 "error: invalid repo '$_url' (port-only host in url)"
+                    ;;
+            esac
             _path=${_url#*://}
             _path=${_path#*/}
             _path=${_path%.git}

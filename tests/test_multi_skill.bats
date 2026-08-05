@@ -38,13 +38,17 @@ setup() {
     [[ "$output" == *"Installed: .agents/skills/alpha"* ]]
 }
 
-@test "multi: two --skill flags install in order" {
+@test "multi: three --skill flags install in order" {
     setup_fake_git
-    run_script "file://$FIXTURE" --skill "alpha" --skill "beta"
+    run_script "file://$FIXTURE" --skill "alpha" --skill "beta" --skill "gamma"
 
     [ "$status" -eq 0 ]
     [ -f "$PWD/.agents/skills/alpha/SKILL.md" ]
     [ -f "$PWD/.agents/skills/beta/SKILL.md" ]
+    [ -f "$PWD/.agents/skills/gamma/SKILL.md" ]
+    [[ "$output" == *"Installed: .agents/skills/alpha"* ]]
+    [[ "$output" == *"Installed: .agents/skills/beta"* ]]
+    [[ "$output" == *"Installed: .agents/skills/gamma"* ]]
 }
 
 @test "multi: fresh cache -> exactly one clone --depth=1, zero pulls" {
@@ -126,32 +130,51 @@ setup() {
     FIXTURE=$(fixture_path repo-multi)
     setup_fake_git
 
-    run_script "file://$FIXTURE" --skill "my-skill" "$BATS_TEST_TMPDIR/dest" </dev/null
+    DEST="$BATS_TEST_TMPDIR/dest"
+    run_script "file://$FIXTURE" --skill "my-skill" "$DEST" </dev/null
 
     [ "$status" -eq 5 ]
+    [ ! -d "$DEST" ]
     [ ! -d "$PWD/.agents/skills" ]
+    [[ "$output" == *".agents/my-skill"* ]]
+    [[ "$output" == *"skills named 'my-skill' found"* ]]
 }
 
-@test "multi: N-matches + TTY in multi-skill -> prompts" {
+@test "multi: N-matches + TTY in multi-skill -> prompts and default-1 selects bucket-1" {
     FIXTURE=$(fixture_path repo-multi)
     setup_fake_git
-
-    # macOS `script` does not support -c. We invoke the script
-    # directly as the command argument: `script -q typescript
-    # /path/to/script ...`. The PTY allocation makes [ ! -t 0 ]
-    # return false in pick_skill_match, so the prompt path runs
-    # instead of the exit-5 path. We do NOT verify prompt
-    # completion (PTY-stdin piping across `script` is unreliable
-    # on macOS); we only verify the prompt was emitted, which
-    # proves the resolve_skills -> pick_skill_match -> prompt
-    # chain works in multi-skill context. The prompt-completion
-    # path itself is already covered by test_find_skill_dir.bats.
     export FAKE_GIT_ORIGIN="file://$FIXTURE"
+
+    # Part A: prompt emission. macOS BSD `script -q typescript
+    # CMD` allocates a PTY for CMD; pick_skill_match sees [ -t 0 ]
+    # true and runs the prompt path.
     TYPESCRIPT="$BATS_TEST_TMPDIR/typescript"
     OUTPUT=$(script -q "$TYPESCRIPT" "$TARGET" "file://$FIXTURE" --skill "my-skill" "$BATS_TEST_TMPDIR/dest" 2>&1 || true)
     rm -f "$TYPESCRIPT"
     [[ "$OUTPUT" == *"Found 4 matches"* ]]
     [[ "$OUTPUT" == *"Select [1-4]"* ]]
+
+    # Part B: default-1 contract. prompt_choice (agent-skills.sh:55-89)
+    # must echo "1" on stdout when stdin delivers an empty line.
+    # We extract the function via awk and run it in a sub-bash with
+    # stubbed die/log/read helpers. Sourcing the full script is
+    # unsafe because of `set -eu` + `main "$@"` at the script's
+    # tail. macOS BSD `script` does NOT propagate stdin through the
+    # PTY to the child, so programmatic end-to-end selection is
+    # unreliable on macOS; this unit proof pins the default-1 logic
+    # that drives the install path in the TTY branch.
+    _pc_src=$(awk '/^prompt_choice\(/,/^}/' "$TARGET")
+    _pc_script="$BATS_TEST_TMPDIR/prompt_choice_test.sh"
+    {
+        printf 'die() { printf "%%s\\n" "$2" >&2; exit "$1"; }\n'
+        printf 'log() { printf "%%s\\n" "$*" >&2; }\n'
+        printf 'read() { REPLY=""; return 0; }\n'
+        printf '%s\n' "$_pc_src"
+        printf 'prompt_choice "Select [1-4] (default: 1): " 4\n'
+    } > "$_pc_script"
+    OUT=$(bash "$_pc_script")
+    rm -f "$_pc_script"
+    [ "$OUT" = "1" ]
 }
 
 # ---- --skill flag parser cases --------------------------------------------

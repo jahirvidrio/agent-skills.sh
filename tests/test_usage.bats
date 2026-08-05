@@ -13,7 +13,7 @@ load 'lib/test_helper'
     run_script --help
     [ "$status" -eq 0 ]
     [[ "$output" == *"Usage:"* ]]
-    [[ "$output" == *"agent-skills.sh <repo> <skill-name> <dest-dir>"* ]]
+    [[ "$output" == *"--skill <name> [--skill <name>...] [dest]"* ]]
     [[ "$output" == *"Exit codes:"* ]]
 }
 
@@ -29,22 +29,28 @@ load 'lib/test_helper'
     [[ "$output" == *"Usage:"* ]]
 }
 
-@test "one argument prints usage and exits 2" {
+@test "one argument exits 2 mentioning --skill" {
     run_script only-one-arg
     [ "$status" -eq 2 ]
-    [[ "$output" == *"Usage:"* ]]
+    [[ "$output" == *"--skill"* ]]
 }
 
-@test "two arguments prints usage and exits 2" {
+@test "two arguments exits 2 mentioning --skill" {
     run_script owner/repo only-two
     [ "$status" -eq 2 ]
-    [[ "$output" == *"Usage:"* ]]
+    [[ "$output" == *"--skill"* ]]
 }
 
 @test "too many arguments prints usage and exits 2" {
     run_script owner/repo my-skill .agents/skills extra
     [ "$status" -eq 2 ]
     [[ "$output" == *"Usage:"* ]]
+}
+
+@test "old 3-positional signature exits 2 with migration message" {
+    run_script owner/repo my-skill .agents/skills
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"--skill <name> [--skill <name>...] [dest]"* ]]
 }
 
 @test "--version prints version and exits 0" {
@@ -58,7 +64,7 @@ load 'lib/test_helper'
     DEST="$BATS_TEST_TMPDIR/dest"
     setup_fake_git
 
-    run_script --no-banner "file://$FIXTURE" "my-skill" "$DEST"
+    run_script --no-banner "file://$FIXTURE" --skill "my-skill" "$DEST"
 
     [ "$status" -eq 0 ]
     # The banner contains the unique substring "__| |_"; with
@@ -74,7 +80,7 @@ load 'lib/test_helper'
     setup_fake_git
     export AGENT_SKILLS_NO_BANNER=1
 
-    run_script "file://$FIXTURE" "my-skill" "$DEST"
+    run_script "file://$FIXTURE" --skill "my-skill" "$DEST"
 
     [ "$status" -eq 0 ]
     [[ "$output" != *"__| |_"* ]]
@@ -85,14 +91,14 @@ load 'lib/test_helper'
     DEST="$BATS_TEST_TMPDIR/dest"
     setup_fake_git
 
-    run_script "file://$FIXTURE" "my-skill" "$DEST"
+    run_script "file://$FIXTURE" --skill "my-skill" "$DEST"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"__| |_"* ]]
 }
 
 @test "unknown flag exits 2" {
-    run_script --no-such-flag owner/repo my-skill .agents/skills
+    run_script --no-such-flag owner/repo --skill my-skill
     [ "$status" -eq 2 ]
     [[ "$output" == *"unknown flag"* ]]
 }
@@ -102,7 +108,7 @@ load 'lib/test_helper'
     DEST="$BATS_TEST_TMPDIR/dest"
     setup_fake_git
 
-    run_script -- "file://$FIXTURE" "my-skill" "$DEST"
+    run_script --no-banner --skill my-skill -- "file://$FIXTURE" "$DEST"
 
     [ "$status" -eq 0 ]
 }

@@ -12,7 +12,7 @@ load 'lib/test_helper'
     DEST="$BATS_TEST_TMPDIR/dest"
     setup_fake_git
 
-    run_script "file://$FIXTURE" "my-skill" "$DEST"
+    run_script "file://$FIXTURE" --skill "my-skill" "$DEST"
 
     [ "$status" -eq 0 ]
     [ -f "$DEST/my-skill/SKILL.md" ]
@@ -24,7 +24,7 @@ load 'lib/test_helper'
     FIXTURE=$(fixture_path repo-multi)
     setup_fake_git
 
-    run_script "file://$FIXTURE" "my-skill" "$BATS_TEST_TMPDIR/dest"
+    run_script "file://$FIXTURE" --skill "my-skill" "$BATS_TEST_TMPDIR/dest"
 
     [ "$status" -eq 5 ]
     [[ "$output" == *".agents/my-skill"* ]]
@@ -37,21 +37,21 @@ load 'lib/test_helper'
     FIXTURE=$(fixture_path repo-empty)
     setup_fake_git
 
-    run_script "file://$FIXTURE" "my-skill" "$BATS_TEST_TMPDIR/dest"
+    run_script "file://$FIXTURE" --skill "my-skill" "$BATS_TEST_TMPDIR/dest"
 
     [ "$status" -eq 3 ]
 }
 
-@test "e2e logs include repo, skill, cache, and dest-dir lines" {
+@test "e2e logs include repo, skills, cache, and dest-dir lines" {
     FIXTURE=$(fixture_path repo-single)
     setup_fake_git
     DEST="$BATS_TEST_TMPDIR/dest"
 
-    run_script "file://$FIXTURE" "my-skill" "$DEST"
+    run_script "file://$FIXTURE" --skill "my-skill" "$DEST"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"repo:     file://$FIXTURE"* ]]
-    [[ "$output" == *"skill:    my-skill"* ]]
+    [[ "$output" == *"skills:   my-skill"* ]]
     [[ "$output" == *"cache:    $(cache_root)/local/repo-single"* ]]
     [[ "$output" == *"dest-dir: $DEST"* ]]
 }

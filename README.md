@@ -5,10 +5,10 @@ POSIX-compatible shell script to download an agent skill from any git repository
 ## Usage
 
 ```
-agent-skills.sh <repo> <skill-name> <dest-dir>
+agent-skills.sh [options] <repo> --skill <name> [--skill <name>...] [dest]
 ```
 
-The script clones `<repo>` (cached at `~/.cache/agent-skills/<owner>/<repo>` and refreshed on subsequent runs with `git pull --depth=1`), finds a directory named `<skill-name>` that directly contains a `SKILL.md`, and copies it to `<dest-dir>/<skill-name>`.
+The script clones `<repo>` (cached at `~/.cache/agent-skills/<owner>/<repo>` and refreshed on subsequent runs with `git pull --depth=1`), finds each `<name>` directory that directly contains a `SKILL.md`, and copies it to `<dest>/<name>`. The repo is cloned or pulled exactly once per invocation, regardless of how many `--skill` flags are passed. If `<dest>` is omitted, the script uses `.agents/skills` resolved relative to the current working directory.
 
 `<repo>` accepts:
 
@@ -17,12 +17,16 @@ The script clones `<repo>` (cached at `~/.cache/agent-skills/<owner>/<repo>` and
 - `git@host:owner/repo`   → used as-is
 - `file:///local/path`    → used as-is (useful for local testing; cached under `local/<basename>`)
 
+`--skill <name>` may be repeated to install multiple skills from the same repo in one invocation; each skill name must match `[A-Za-z0-9._-]`, with no leading dot and no `/`. `--skill=<name>` (the `=value` form) is rejected by design — use separate tokens.
+
 ### Examples
 
 ```
-agent-skills.sh owner/repo my-skill .agents/skills
-agent-skills.sh https://github.com/owner/repo.git my-skill .agents/skills
-agent-skills.sh git@github.com:owner/repo.git my-skill .agents/skills
+agent-skills.sh owner/repo --skill my-skill
+agent-skills.sh owner/repo --skill skill-1 --skill skill-2 --skill skill-3
+agent-skills.sh owner/repo --skill my-skill ./vendor/skills
+agent-skills.sh --no-banner owner/repo --skill my-skill
+agent-skills.sh git@github.com:owner/repo.git --skill my-skill
 ```
 
 When multiple directories named `<skill-name>` are found, the script applies the **5-bucket rule** to classify each match into one of 5 buckets by path shape and sorts them by bucket priority (then depth asc, then path asc). Buckets (highest to lowest priority):
@@ -65,7 +69,7 @@ The script ranks them in this order:
 | --- | --- |
 | 0 | success |
 | 1 | generic error |
-| 2 | invalid arguments |
+| 2 | invalid arguments (also covers the old `<repo> <skill-name> <dest-dir>` signature, which now prints a one-line migration message naming the new form) |
 | 3 | skill not found in repo |
 | 4 | git clone/pull failed |
 | 5 | ambiguous match (multiple skills found, stdin is not a TTY) |

@@ -6,7 +6,7 @@ set -eu
 
 # ---- Configuration ---------------------------------------------------------
 
-VERSION="0.2.0"
+VERSION="0.3.0"
 CACHE_ROOT="${HOME:?HOME must be set}/.cache/agent-skills"
 
 # ---- Prerequisites ---------------------------------------------------------
@@ -95,42 +95,49 @@ usage() {
 agent-skills.sh - Download an agent skill from a git repository.
 
 Usage:
-  agent-skills.sh [options] <repo> <skill-name> <dest-dir>
+  agent-skills.sh [options] <repo> --skill <name> [--skill <name>...] [dest]
 
 Options:
-  -h, --help     show this help and exit
-  --version      print version and exit
-  --no-banner    suppress the startup banner (also: AGENT_SKILLS_NO_BANNER=1)
-  --             end of options; everything after is positional
+  -h, --help           show this help and exit
+  --version            print version and exit
+  --no-banner          suppress the startup banner (also: AGENT_SKILLS_NO_BANNER=1)
+  --skill <name>       install <name> from the repo (repeatable, required).
+                       Each --skill consumes the next token as the skill name;
+                       --skill=<name> is rejected.
+  --                   end of options; everything after is positional
 
 Arguments:
   repo       Repository identifier. Recognized forms:
                owner/repo            -> https://github.com/owner/repo.git
                https://host/path     -> used as-is
                git@host:owner/repo   -> used as-is
-  skill-name Name of the skill directory (must directly contain SKILL.md).
-  dest-dir   Destination directory. Created if missing. The skill lands at
-             dest-dir/<skill-name>, replacing any prior copy.
+  dest       Destination directory (optional, last positional). Defaults to
+             .agents/skills relative to the current working directory.
+             Created if missing. Each requested skill lands at
+             dest/<skill-name>, replacing any prior copy.
 
 Cache:
   Repos are cached at $HOME/.cache/agent-skills/<owner>/<repo> and
   reused across runs. Each invocation refreshes the cached clone with
-  `git pull --depth=1`.
+  `git pull --depth=1`. The repo is cloned or pulled exactly once per
+  invocation, regardless of how many --skill flags were passed.
 
 Exit codes:
   0  success
   1  generic error
-  2  invalid arguments
+  2  invalid arguments (also: the old <repo> <skill-name> <dest-dir>
+     signature, which now exits with a one-line migration message)
   3  skill not found in repo
   4  git clone/pull failed
   5  ambiguous match (multiple skills with the requested name, and
      stdin is not a TTY so the script cannot ask which one to use)
 
 Examples:
-  agent-skills.sh owner/repo my-skill .agents/skills
-  agent-skills.sh https://github.com/owner/repo.git my-skill .agents/skills
-  agent-skills.sh git@github.com:owner/repo.git my-skill .agents/skills
-  agent-skills.sh --no-banner owner/repo my-skill .agents/skills
+  agent-skills.sh owner/repo --skill my-skill
+  agent-skills.sh owner/repo --skill skill-1 --skill skill-2 --skill skill-3
+  agent-skills.sh owner/repo --skill my-skill ./vendor/skills
+  agent-skills.sh --no-banner owner/repo --skill my-skill
+  agent-skills.sh git@github.com:owner/repo.git --skill my-skill
 EOF
     exit "${1:-0}"
 }
@@ -423,6 +430,23 @@ clone_or_update() {
     return 0
 }
 
+# resolve_skills <cache_dir> <name> [<name>...]
+# For each <name>, runs find_skill_dir against <cache_dir>. On success,
+# prints "<name>\n<path>\n" pairs to stdout in input order. On the
+# first failure (missing: exit 3, ambiguous + non-TTY: exit 5),
+# exits with the same code WITHOUT printing further pairs. NO copy
+# happens here; callers consume the output to drive an atomic apply
+# phase. Prompts for ambiguous matches (TTY only) run during resolve,
+# at the time the user expects.
+resolve_skills() {
+    _rs_cache=$1
+    shift
+    for _rs_name; do
+        _rs_dir=$(find_skill_dir "$_rs_cache" "$_rs_name") || exit $?
+        printf '%s\n%s\n' "$_rs_name" "$_rs_dir"
+    done
+}
+
 # find_skill_dir <root> <name>
 # Echoes the path of a directory named <name> that directly contains a
 # file named SKILL.md, anywhere under <root> (excluding the .git tree).
@@ -622,17 +646,31 @@ copy_skill() {
 # ---- Main ------------------------------------------------------------------
 
 # parse_args <args...>
-# Walks the argument list, handles flags, and writes the three
-# positional args into globals REPO_ARG, SKILL_NAME, DEST_DIR.
-# Flags recognized:
-#   -h, --help     -> usage 0 (exits)
-#   --version      -> print_version then exit 0
-#   --no-banner    -> sets SHOW_BANNER=0 (consumed by print_banner)
-#   --             -> end of flags; rest are positional
-# Any other -X flag dies with code 2. Dies with code 2 if the
-# remaining positional count is not exactly 3.
+# Walks the argument list and writes parsed values into globals
+# REPO_ARG, SKILL_NAMES (space-separated), DEST_DIR, SHOW_BANNER.
+# Skill names match [A-Za-z0-9._-] so a space-separated accumulator
+# is unambiguous. Positionals may contain spaces (DEST_DIR is a
+# user-supplied path) so they are tracked in three discrete vars.
+#
+# Flags recognized anywhere in argv:
+#   -h, --help         -> usage 0 (exits)
+#   --version          -> print_version then exit 0
+#   --no-banner        -> sets SHOW_BANNER=0
+#   --skill NAME       -> appends NAME to the skill list (repeatable)
+#   --skill=NAME       -> REJECTED (exit 2)
+#   --                 -> end of flags; rest are pure positional
+# Any other -X flag dies with code 2. Dies with code 2 if:
+#   - exactly 3 positionals AND no --skill: hard-break message
+#   - arity outside {1,2}: usage 2 (stderr contains "Usage:")
+#   - SKILL_NAMES empty after the walk
 parse_args() {
     _pa_show_banner=1
+    _pa_skill_list=""
+    _pa_first_pos=""
+    _pa_second_pos=""
+    _pa_third_pos=""
+    _pa_pos_count=0
+
     while [ $# -gt 0 ]; do
         case $1 in
             -h|--help)
@@ -645,27 +683,81 @@ parse_args() {
             --no-banner)
                 _pa_show_banner=0
                 ;;
-            --)
+            --skill=*)
+                die 2 "error: --skill=<name> is not supported; use '--skill <name>' (separate tokens)"
+                ;;
+            --skill)
                 shift
+                if [ $# -eq 0 ]; then
+                    die 2 "error: --skill requires a name"
+                fi
+                case $1 in
+                    ""|--*)
+                        die 2 "error: --skill requires a name"
+                        ;;
+                esac
+                if [ -z "$_pa_skill_list" ]; then
+                    _pa_skill_list=$1
+                else
+                    _pa_skill_list="$_pa_skill_list $1"
+                fi
+                ;;
+            --)
+                # End of flags; remaining tokens are pure positionals.
+                shift
+                while [ $# -gt 0 ]; do
+                    _pa_pos_count=$((_pa_pos_count + 1))
+                    case $_pa_pos_count in
+                        1) _pa_first_pos=$1 ;;
+                        2) _pa_second_pos=$1 ;;
+                        3) _pa_third_pos=$1 ;;
+                    esac
+                    shift
+                done
                 break
                 ;;
             -*)
                 die 2 "error: unknown flag '$1'"
                 ;;
             *)
-                break
+                _pa_pos_count=$((_pa_pos_count + 1))
+                case $_pa_pos_count in
+                    1) _pa_first_pos=$1 ;;
+                    2) _pa_second_pos=$1 ;;
+                    3) _pa_third_pos=$1 ;;
+                esac
                 ;;
         esac
         shift
     done
 
-    if [ $# -ne 3 ]; then
+    # REQ-003 scenario 1: exactly 3 positionals AND zero --skill ->
+    # migration message. Tightened from -ge 3 to -eq 3 so that 4+
+    # positionals fall through to the usage 2 branch below.
+    if [ "$_pa_pos_count" -eq 3 ] && [ -z "$_pa_skill_list" ]; then
+        die 2 "error: this signature was removed. Use:
+  agent-skills.sh <repo> --skill <name> [--skill <name>...] [dest]"
+    fi
+
+    # REQ-003 scenario 2: arity outside {1,2} -> usage 2 (stderr
+    # contains "Usage:"). Runs BEFORE the empty-skill check so that
+    # 4+ positionals without --skill reach this branch instead of
+    # printing "at least one --skill required".
+    if [ "$_pa_pos_count" -lt 1 ] || [ "$_pa_pos_count" -gt 2 ]; then
         usage 2
     fi
 
-    REPO_ARG=$1
-    SKILL_NAME=$2
-    DEST_DIR=$3
+    if [ -z "$_pa_skill_list" ]; then
+        die 2 "error: at least one --skill <name> is required"
+    fi
+
+    REPO_ARG=$_pa_first_pos
+    if [ "$_pa_pos_count" -eq 2 ]; then
+        DEST_DIR=$_pa_second_pos
+    else
+        DEST_DIR=".agents/skills"
+    fi
+    SKILL_NAMES=$_pa_skill_list
     SHOW_BANNER=$_pa_show_banner
 }
 
@@ -674,19 +766,59 @@ main() {
 
     print_banner
 
-    validate_skill_name "$SKILL_NAME"
-    parse_repo_arg "$REPO_ARG"
+    # Validate ALL skill names BEFORE any I/O. validate_skill_name
+    # dies 2 on bad input; this preserves atomic-batch semantics
+    # (REQ-004 / REQ-006) and avoids a wasted network round-trip.
+    # SC2086: SKILL_NAMES is space-separated; skill names match
+    # [A-Za-z0-9._-] so word-splitting on whitespace is intentional.
+    # shellcheck disable=SC2086
+    for _m_name in $SKILL_NAMES; do
+        validate_skill_name "$_m_name"
+    done
 
+    parse_repo_arg "$REPO_ARG"
     CACHE_DIR="${CACHE_ROOT%/}/$CACHE_KEY"
 
     log "repo:     $REPO_URL"
-    log "skill:    $SKILL_NAME"
     log "cache:    $CACHE_DIR"
     log "dest-dir: $DEST_DIR"
+    log "skills:   $SKILL_NAMES"
 
+    # Single remote-fetch for the whole batch (REQ-005).
     clone_or_update "$CACHE_DIR" "$REPO_URL"
-    SKILL_DIR=$(find_skill_dir "$CACHE_DIR" "$SKILL_NAME")
-    copy_skill "$SKILL_DIR" "$DEST_DIR" "$SKILL_NAME"
+
+    # Atomic resolve-then-apply (fixes JD-001):
+    #
+    #   1. resolve_skills writes <name>\n<path>\n pairs to a temp
+    #      file. find_skill_dir's prompts run here. Failure on any
+    #      single name dies BEFORE the apply loop starts, so no copy
+    #      has dirtied the destination.
+    #   2. The apply loop consumes the pairs via
+    #      `while IFS= read -r && read -r`. The `done < file`
+    #      redirect (NOT a pipe) keeps us in the same shell, so
+    #      state survives across iterations. Each iteration reads
+    #      name then path; `&&` short-circuits the loop on EOF.
+    #
+    # Two-line-per-pair encoding (instead of one-line-per-path)
+    # because copy_skill needs both <src> and <name>; we walk
+    # them as explicit pairs to avoid parallel-list drift.
+    #
+    # Atomicity-on-signal gap (JD2-003): SIGINT/TERM delivered while
+    # copy_skill is mid-run can leave a partial <dest>/<name>/ tree
+    # on disk. The EXIT trap only removes $_pairs_tmp; it cannot
+    # roll back a half-written copy. This is a pre-existing
+    # limitation inherited from the single-skill main() and is out
+    # of scope for this change.
+    _pairs_tmp=$(mktemp) || { log "error: cannot create temp file" >&2; exit 1; }
+    trap 'rm -f "$_pairs_tmp"' EXIT INT TERM
+
+    # SC2086: SKILL_NAMES is space-separated; word-splitting is intentional.
+    # shellcheck disable=SC2086
+    resolve_skills "$CACHE_DIR" $SKILL_NAMES > "$_pairs_tmp" || exit $?
+
+    while IFS= read -r _r_name && IFS= read -r _r_src; do
+        copy_skill "$_r_src" "$DEST_DIR" "$_r_name"
+    done < "$_pairs_tmp"
 
     log "Done."
 }

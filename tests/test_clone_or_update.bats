@@ -16,7 +16,7 @@ setup() {
     FIXTURE=$(fixture_path repo-single)
     DEST="$BATS_TEST_TMPDIR/dest"
 
-    run_script "file://$FIXTURE" --skill "my-skill" "$DEST"
+    run_script "file://$FIXTURE" --skill "my-skill" --dest "$DEST"
 
     [ "$status" -eq 0 ]
     [ -f "$DEST/my-skill/SKILL.md" ]
@@ -28,7 +28,7 @@ setup() {
     DEST="$BATS_TEST_TMPDIR/dest"
     prepopulate_cache "local/repo-single" "$FIXTURE"
 
-    run_script "file://$FIXTURE" --skill "my-skill" "$DEST"
+    run_script "file://$FIXTURE" --skill "my-skill" --dest "$DEST"
 
     [ "$status" -eq 0 ]
     [ -f "$DEST/my-skill/SKILL.md" ]
@@ -39,7 +39,7 @@ setup() {
     mkdir -p "$BAD"
     echo "leftover" > "$BAD/some-file"
 
-    run_script "file:///foo/bad-repo.git" --skill "my-skill" "$BATS_TEST_TMPDIR/dest"
+    run_script "file:///foo/bad-repo.git" --skill "my-skill" --dest "$BATS_TEST_TMPDIR/dest"
 
     [ "$status" -eq 4 ]
     [[ "$output" == *"is not a git repo"* ]]
@@ -50,7 +50,7 @@ setup() {
     DEST="$BATS_TEST_TMPDIR/dest"
     export FAKE_GIT_FAIL=1
 
-    run_script "file://$FIXTURE" --skill "my-skill" "$DEST"
+    run_script "file://$FIXTURE" --skill "my-skill" --dest "$DEST"
 
     [ "$status" -eq 4 ]
     [[ "$output" == *"git clone failed"* ]]
@@ -63,7 +63,7 @@ setup() {
     export FAKE_GIT_ORIGIN="file://$FIXTURE"
     prepopulate_cache "local/repo-single" "$FIXTURE"
 
-    run_script "file://$FIXTURE" --skill "my-skill" "$DEST"
+    run_script "file://$FIXTURE" --skill "my-skill" --dest "$DEST"
 
     [ "$status" -eq 0 ]
     [ -f "$DEST/my-skill/SKILL.md" ]
@@ -77,7 +77,7 @@ setup() {
     export FAKE_GIT_ORIGIN="file:///wrong/host/repo"
     prepopulate_cache "local/repo-single" "$FIXTURE"
 
-    run_script "file://$FIXTURE" --skill "my-skill" "$DEST"
+    run_script "file://$FIXTURE" --skill "my-skill" --dest "$DEST"
 
     [ "$status" -eq 0 ]
     [ -f "$DEST/my-skill/SKILL.md" ]
@@ -91,7 +91,7 @@ setup() {
     unset FAKE_GIT_ORIGIN
     prepopulate_cache "local/repo-single" "$FIXTURE"
 
-    run_script "file://$FIXTURE" --skill "my-skill" "$DEST"
+    run_script "file://$FIXTURE" --skill "my-skill" --dest "$DEST"
 
     [ "$status" -eq 0 ]
     [ -f "$DEST/my-skill/SKILL.md" ]
@@ -105,7 +105,7 @@ setup() {
     # Do NOT prepopulate cache.
     unset FAKE_GIT_ORIGIN
 
-    run_script "file://$FIXTURE" --skill "my-skill" "$DEST"
+    run_script "file://$FIXTURE" --skill "my-skill" --dest "$DEST"
 
     [ "$status" -eq 0 ]
     [ -f "$DEST/my-skill/SKILL.md" ]
@@ -118,7 +118,7 @@ setup() {
     export FAKE_GIT_ORIGIN="file:///wrong/host/repo"
     prepopulate_cache "local/repo-single" "$FIXTURE"
 
-    run_script "file://$FIXTURE" --skill "my-skill" "$DEST"
+    run_script "file://$FIXTURE" --skill "my-skill" --dest "$DEST"
 
     [ "$status" -eq 0 ]
     ! [[ "$output" == *"warning"* ]]

@@ -14,7 +14,7 @@ load 'lib/test_helper'
     prepopulate_cache "local/repo-single" "$FIXTURE"
     setup_fake_git
 
-    run_script "file://$FIXTURE" --skill "my-skill" "$DEST"
+    run_script "file://$FIXTURE" --skill "my-skill" --dest "$DEST"
 
     [ "$status" -eq 0 ]
     [ -f "$DEST/my-skill/SKILL.md" ]
@@ -25,7 +25,7 @@ load 'lib/test_helper'
     prepopulate_cache "local/repo-multi" "$FIXTURE"
     setup_fake_git
 
-    run_script "file://$FIXTURE" --skill "my-skill" "$BATS_TEST_TMPDIR/dest"
+    run_script "file://$FIXTURE" --skill "my-skill" --dest "$BATS_TEST_TMPDIR/dest"
 
     [ "$status" -eq 5 ]
     [[ "$output" == *"skills named 'my-skill' found"* ]]
@@ -36,7 +36,7 @@ load 'lib/test_helper'
     prepopulate_cache "local/repo-multi" "$FIXTURE"
     setup_fake_git
 
-    run_script "file://$FIXTURE" --skill "my-skill" "$BATS_TEST_TMPDIR/dest"
+    run_script "file://$FIXTURE" --skill "my-skill" --dest "$BATS_TEST_TMPDIR/dest"
 
     [ "$status" -eq 5 ]
     # .agents must appear before .opencode in the match list (bucket-4 path asc)
@@ -52,7 +52,7 @@ load 'lib/test_helper'
     prepopulate_cache "local/repo-empty" "$FIXTURE"
     setup_fake_git
 
-    run_script "file://$FIXTURE" --skill "my-skill" "$BATS_TEST_TMPDIR/dest"
+    run_script "file://$FIXTURE" --skill "my-skill" --dest "$BATS_TEST_TMPDIR/dest"
 
     [ "$status" -eq 3 ]
     [[ "$output" == *"skill 'my-skill' not found"* ]]
@@ -69,7 +69,7 @@ load 'lib/test_helper'
     export FAKE_GIT_ORIGIN="file:///does/not/matter.git"
     DEST="$BATS_TEST_TMPDIR/dest"
 
-    run_script "file:///does/not/matter.git" --skill "my-skill" "$DEST"
+    run_script "file:///does/not/matter.git" --skill "my-skill" --dest "$DEST"
 
     [ "$status" -eq 0 ]
     [ -f "$DEST/my-skill/SKILL.md" ]
@@ -81,7 +81,7 @@ load 'lib/test_helper'
     prepopulate_cache "local/repo-multi-depth" "$FIXTURE"
     setup_fake_git
 
-    run_script "file://$FIXTURE" --skill "my-skill" "$BATS_TEST_TMPDIR/dest"
+    run_script "file://$FIXTURE" --skill "my-skill" --dest "$BATS_TEST_TMPDIR/dest"
 
     [ "$status" -eq 5 ]
 

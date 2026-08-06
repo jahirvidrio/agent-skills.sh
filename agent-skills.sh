@@ -9,6 +9,16 @@ set -eu
 VERSION="0.3.0"
 CACHE_ROOT="${HOME:?HOME must be set}/.cache/agent-skills"
 
+resolve_agent_dest() {
+    _rad_name=$1
+    case $_rad_name in
+        opencode) printf '%s' '.agents/skills' ;;
+        claude-code) printf '%s' '.claude/skills' ;;
+        gemini-cli) printf '%s' '.agents/skills' ;;
+        *) die 2 "error: unknown agent '$_rad_name' (supported: opencode, claude-code, gemini-cli)" ;;
+    esac
+}
+
 # ---- Prerequisites ---------------------------------------------------------
 
 command -v git >/dev/null 2>&1 || {
@@ -95,7 +105,7 @@ usage() {
 agent-skills.sh - Download an agent skill from a git repository.
 
 Usage:
-  agent-skills.sh [options] <repo> --skill <name> [--skill <name>...] [dest]
+  agent-skills.sh [options] <repo> --skill <name> [--skill <name>...]
 
 Options:
   -h, --help           show this help and exit
@@ -104,17 +114,21 @@ Options:
   --skill <name>       install <name> from the repo (repeatable, required).
                        Each --skill consumes the next token as the skill name;
                        --skill=<name> is rejected.
+  --agent <name>       select destination for opencode, claude-code, or gemini-cli
+                       (default: opencode).
+  --dest <path>        override the agent destination with a custom path.
   --                   end of options; everything after is positional
 
 Arguments:
   repo       Repository identifier. Recognized forms:
                owner/repo            -> https://github.com/owner/repo.git
                https://host/path     -> used as-is
-               git@host:owner/repo   -> used as-is
-  dest       Destination directory (optional, last positional). Defaults to
-             .agents/skills relative to the current working directory.
-             Created if missing. Each requested skill lands at
-             dest/<skill-name>, replacing any prior copy.
+                git@host:owner/repo   -> used as-is
+
+Destination:
+  Agent destinations are relative to the current working directory and are
+  created if missing. Each requested skill replaces any prior copy at
+  <destination>/<skill-name>.
 
 Cache:
   Repos are cached at $HOME/.cache/agent-skills/<owner>/<repo> and
@@ -135,7 +149,8 @@ Exit codes:
 Examples:
   agent-skills.sh owner/repo --skill my-skill
   agent-skills.sh owner/repo --skill skill-1 --skill skill-2 --skill skill-3
-  agent-skills.sh owner/repo --skill my-skill ./vendor/skills
+  agent-skills.sh owner/repo --skill my-skill --agent claude-code
+  agent-skills.sh owner/repo --skill my-skill --dest ./vendor/skills
   agent-skills.sh --no-banner owner/repo --skill my-skill
   agent-skills.sh git@github.com:owner/repo.git --skill my-skill
 EOF
@@ -666,9 +681,9 @@ copy_skill() {
 parse_args() {
     _pa_show_banner=1
     _pa_skill_list=""
+    _pa_agent=""
+    _pa_dest_override=""
     _pa_first_pos=""
-    _pa_second_pos=""
-    _pa_third_pos=""
     _pa_pos_count=0
 
     while [ $# -gt 0 ]; do
@@ -702,6 +717,33 @@ parse_args() {
                     _pa_skill_list="$_pa_skill_list $1"
                 fi
                 ;;
+            --agent=*)
+                die 2 "error: --agent=<name> is not supported; use '--agent <name>' (separate tokens)"
+                ;;
+            --agent)
+                shift
+                if [ $# -eq 0 ]; then
+                    die 2 "error: --agent requires a name"
+                fi
+                case $1 in
+                    ""|--*) die 2 "error: --agent requires a name" ;;
+                esac
+                resolve_agent_dest "$1" >/dev/null
+                _pa_agent=$1
+                ;;
+            --dest=*)
+                die 2 "error: --dest=<path> is not supported; use '--dest <path>' (separate tokens)"
+                ;;
+            --dest)
+                shift
+                if [ $# -eq 0 ]; then
+                    die 2 "error: --dest requires a path"
+                fi
+                case $1 in
+                    ""|--*) die 2 "error: --dest requires a path" ;;
+                esac
+                _pa_dest_override=$1
+                ;;
             --)
                 # End of flags; remaining tokens are pure positionals.
                 shift
@@ -709,8 +751,6 @@ parse_args() {
                     _pa_pos_count=$((_pa_pos_count + 1))
                     case $_pa_pos_count in
                         1) _pa_first_pos=$1 ;;
-                        2) _pa_second_pos=$1 ;;
-                        3) _pa_third_pos=$1 ;;
                     esac
                     shift
                 done
@@ -736,14 +776,11 @@ parse_args() {
     # positionals fall through to the usage 2 branch below.
     if [ "$_pa_pos_count" -eq 3 ] && [ -z "$_pa_skill_list" ]; then
         die 2 "error: this signature was removed. Use:
-  agent-skills.sh <repo> --skill <name> [--skill <name>...] [dest]"
+  agent-skills.sh [--agent <name>] <repo> --skill <name> [--skill <name>...] [--dest <path>]"
     fi
 
-    # REQ-003 scenario 2: arity outside {1,2} -> usage 2 (stderr
-    # contains "Usage:"). Runs BEFORE the empty-skill check so that
-    # 4+ positionals without --skill reach this branch instead of
-    # printing "at least one --skill required".
-    if [ "$_pa_pos_count" -lt 1 ] || [ "$_pa_pos_count" -gt 2 ]; then
+    # Only the repository remains positional.
+    if [ "$_pa_pos_count" -ne 1 ]; then
         usage 2
     fi
 
@@ -752,11 +789,14 @@ parse_args() {
     fi
 
     REPO_ARG=$_pa_first_pos
-    if [ "$_pa_pos_count" -eq 2 ]; then
-        DEST_DIR=$_pa_second_pos
+    if [ -n "$_pa_dest_override" ]; then
+        DEST_DIR=$_pa_dest_override
+    elif [ -n "$_pa_agent" ]; then
+        DEST_DIR=$(resolve_agent_dest "$_pa_agent")
     else
-        DEST_DIR=".agents/skills"
+        DEST_DIR=$(resolve_agent_dest opencode)
     fi
+    AGENT_NAME=${_pa_agent:-opencode}
     SKILL_NAMES=$_pa_skill_list
     SHOW_BANNER=$_pa_show_banner
 }
@@ -781,6 +821,7 @@ main() {
 
     log "repo:     $REPO_URL"
     log "cache:    $CACHE_DIR"
+    log "agent:    $AGENT_NAME"
     log "dest-dir: $DEST_DIR"
     log "skills:   $SKILL_NAMES"
 

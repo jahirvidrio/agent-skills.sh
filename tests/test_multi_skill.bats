@@ -27,6 +27,44 @@ setup() {
     cd "$BATS_TEST_TMPDIR"
 }
 
+@test "agent dest helper: known agents map to expected destinations" {
+    _rad_src=$(awk '/^resolve_agent_dest\(/,/^}/' "$TARGET")
+    _rad_script="$BATS_TEST_TMPDIR/resolve_agent_dest_test.sh"
+    {
+        printf 'die() { printf "%%s\\n" "$2" >&2; exit "$1"; }\n'
+        printf '%s\n' "$_rad_src"
+        printf 'resolve_agent_dest "$1"\n'
+    } > "$_rad_script"
+
+    run sh "$_rad_script" opencode
+    [ "$status" -eq 0 ]
+    [ "$output" = ".agents/skills" ]
+
+    run sh "$_rad_script" claude-code
+    [ "$status" -eq 0 ]
+    [ "$output" = ".claude/skills" ]
+
+    run sh "$_rad_script" gemini-cli
+    [ "$status" -eq 0 ]
+    [ "$output" = ".agents/skills" ]
+}
+
+@test "agent dest helper: unknown agent exits 2 and lists supported agents" {
+    _rad_src=$(awk '/^resolve_agent_dest\(/,/^}/' "$TARGET")
+    _rad_script="$BATS_TEST_TMPDIR/resolve_agent_dest_unknown_test.sh"
+    {
+        printf 'die() { printf "%%s\\n" "$2" >&2; exit "$1"; }\n'
+        printf '%s\n' "$_rad_src"
+        printf 'resolve_agent_dest "$1"\n'
+    } > "$_rad_script"
+
+    run sh "$_rad_script" unknown
+
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"unknown agent 'unknown'"* ]]
+    [[ "$output" == *"supported: opencode, claude-code, gemini-cli"* ]]
+}
+
 # ---- Happy-path coverage --------------------------------------------------
 
 @test "multi: single --skill copies one skill to default dest" {
@@ -131,7 +169,7 @@ setup() {
     setup_fake_git
 
     DEST="$BATS_TEST_TMPDIR/dest"
-    run_script "file://$FIXTURE" --skill "my-skill" "$DEST" </dev/null
+    run_script "file://$FIXTURE" --skill "my-skill" --dest "$DEST" </dev/null
 
     [ "$status" -eq 5 ]
     [ ! -d "$DEST" ]
@@ -204,12 +242,27 @@ setup() {
     run_script "file://$FIXTURE" "my-skill" ".agents/skills"
 
     [ "$status" -eq 2 ]
-    [[ "$output" == *"--skill <name> [--skill <name>...] [dest]"* ]]
+    [[ "$output" == *"--agent <name>"* ]]
+    [[ "$output" == *"--skill <name>"* ]]
+}
+
+@test "multi: --dest overrides a valid agent and unknown agent still fails" {
+    setup_fake_git
+    run_script "file://$FIXTURE" --skill alpha --agent claude-code --dest "$BATS_TEST_TMPDIR/override"
+
+    [ "$status" -eq 0 ]
+    [ -f "$BATS_TEST_TMPDIR/override/alpha/SKILL.md" ]
+    [ ! -d "$PWD/.claude/skills" ]
+
+    run_script "file://$FIXTURE" --skill alpha --agent unknown --dest "$BATS_TEST_TMPDIR/rejected"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"unknown agent"* ]]
+    [ ! -d "$BATS_TEST_TMPDIR/rejected" ]
 }
 
 @test "multi: explicit dest overrides default" {
     setup_fake_git
-    run_script "file://$FIXTURE" --skill "alpha" --skill "beta" "$BATS_TEST_TMPDIR/vendor"
+    run_script "file://$FIXTURE" --skill "alpha" --skill "beta" --dest "$BATS_TEST_TMPDIR/vendor"
 
     [ "$status" -eq 0 ]
     [ -f "$BATS_TEST_TMPDIR/vendor/alpha/SKILL.md" ]

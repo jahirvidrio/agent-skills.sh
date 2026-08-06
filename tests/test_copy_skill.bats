@@ -13,7 +13,7 @@ load 'lib/test_helper'
     prepopulate_cache "local/repo-single" "$FIXTURE"
     setup_fake_git
 
-    run_script "file://$FIXTURE" --skill "my-skill" "$DEST"
+    run_script "file://$FIXTURE" --skill "my-skill" --dest "$DEST"
 
     [ "$status" -eq 0 ]
     [ ! -f "$DEST/my-skill/stale.txt" ]
@@ -26,7 +26,7 @@ load 'lib/test_helper'
     prepopulate_cache "local/repo-single" "$FIXTURE"
     setup_fake_git
 
-    run_script "file://$FIXTURE" --skill "my-skill" "$DEST"
+    run_script "file://$FIXTURE" --skill "my-skill" --dest "$DEST"
 
     [ "$status" -eq 0 ]
     [ -f "$DEST/my-skill/SKILL.md" ]
@@ -40,7 +40,7 @@ load 'lib/test_helper'
     prepopulate_cache "local/repo-single" "$FIXTURE"
     setup_fake_git
 
-    run_script "file://$FIXTURE" --skill "my-skill" "$DEST"
+    run_script "file://$FIXTURE" --skill "my-skill" --dest "$DEST"
 
     [ "$status" -eq 0 ]
     [ ! -d "$DEST/my-skill/.git" ]

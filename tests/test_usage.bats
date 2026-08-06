@@ -13,8 +13,19 @@ load 'lib/test_helper'
     run_script --help
     [ "$status" -eq 0 ]
     [[ "$output" == *"Usage:"* ]]
-    [[ "$output" == *"--skill <name> [--skill <name>...] [dest]"* ]]
+    [[ "$output" == *"agent-skills.sh [options] <repo> --skill <name> [--skill <name>...]"* ]]
+    [[ "$output" != *"[dest]"* ]]
     [[ "$output" == *"Exit codes:"* ]]
+}
+
+@test "--help documents agent and destination flags without positional dest" {
+    run_script --help
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"--agent <name>"* ]]
+    [[ "$output" == *"--dest <path>"* ]]
+    [[ "$output" != *"dest       Destination directory"* ]]
+    [[ "$output" == *"--agent claude-code"* ]]
+    [[ "$output" == *"--dest ./vendor/skills"* ]]
 }
 
 @test "-h is an alias for --help" {
@@ -41,6 +52,12 @@ load 'lib/test_helper'
     [[ "$output" == *"--skill"* ]]
 }
 
+@test "two positionals with --skill are rejected" {
+    run_script owner/repo legacy-dest --skill my-skill
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"Usage:"* ]]
+}
+
 @test "too many arguments prints usage and exits 2" {
     run_script owner/repo my-skill .agents/skills extra
     [ "$status" -eq 2 ]
@@ -50,7 +67,8 @@ load 'lib/test_helper'
 @test "old 3-positional signature exits 2 with migration message" {
     run_script owner/repo my-skill .agents/skills
     [ "$status" -eq 2 ]
-    [[ "$output" == *"--skill <name> [--skill <name>...] [dest]"* ]]
+    [[ "$output" == *"--agent <name>"* ]]
+    [[ "$output" == *"--skill <name>"* ]]
 }
 
 @test "--version prints version and exits 0" {
@@ -64,7 +82,7 @@ load 'lib/test_helper'
     DEST="$BATS_TEST_TMPDIR/dest"
     setup_fake_git
 
-    run_script --no-banner "file://$FIXTURE" --skill "my-skill" "$DEST"
+    run_script --no-banner "file://$FIXTURE" --skill "my-skill" --dest "$DEST"
 
     [ "$status" -eq 0 ]
     # The banner contains the unique substring "__| |_"; with
@@ -80,7 +98,7 @@ load 'lib/test_helper'
     setup_fake_git
     export AGENT_SKILLS_NO_BANNER=1
 
-    run_script "file://$FIXTURE" --skill "my-skill" "$DEST"
+    run_script "file://$FIXTURE" --skill "my-skill" --dest "$DEST"
 
     [ "$status" -eq 0 ]
     [[ "$output" != *"__| |_"* ]]
@@ -91,10 +109,55 @@ load 'lib/test_helper'
     DEST="$BATS_TEST_TMPDIR/dest"
     setup_fake_git
 
-    run_script "file://$FIXTURE" --skill "my-skill" "$DEST"
+    run_script "file://$FIXTURE" --skill "my-skill" --dest "$DEST"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"__| |_"* ]]
+}
+
+@test "--agent accepts all supported names" {
+    FIXTURE=$(fixture_path repo-single)
+    cd "$BATS_TEST_TMPDIR"
+
+    setup_fake_git
+    run_script "file://$FIXTURE" --skill my-skill --agent claude-code
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Installed: .claude/skills/my-skill"* ]]
+    [ -f "$PWD/.claude/skills/my-skill/SKILL.md" ]
+}
+
+@test "--agent equals form is rejected" {
+    run_script owner/repo --skill my-skill --agent=foo
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"separate tokens"* ]]
+}
+
+@test "bare --agent is rejected" {
+    run_script owner/repo --skill my-skill --agent
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"requires a name"* ]]
+}
+
+@test "--dest accepts absolute and relative paths" {
+    FIXTURE=$(fixture_path repo-single)
+    setup_fake_git
+
+    run_script "file://$FIXTURE" --skill my-skill --dest "$BATS_TEST_TMPDIR/absolute"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Installed: $BATS_TEST_TMPDIR/absolute/my-skill"* ]]
+    [ -f "$BATS_TEST_TMPDIR/absolute/my-skill/SKILL.md" ]
+}
+
+@test "--dest equals form is rejected" {
+    run_script owner/repo --skill my-skill --dest=foo
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"separate tokens"* ]]
+}
+
+@test "bare --dest is rejected" {
+    run_script owner/repo --skill my-skill --dest
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"requires a path"* ]]
 }
 
 @test "unknown flag exits 2" {
@@ -108,7 +171,7 @@ load 'lib/test_helper'
     DEST="$BATS_TEST_TMPDIR/dest"
     setup_fake_git
 
-    run_script --no-banner --skill my-skill -- "file://$FIXTURE" "$DEST"
+    run_script --no-banner --skill my-skill --dest "$DEST" -- "file://$FIXTURE"
 
     [ "$status" -eq 0 ]
 }

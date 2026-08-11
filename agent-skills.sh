@@ -59,6 +59,158 @@ die() {
     exit "$1"
 }
 
+# ---- Skill-lock helpers ----------------------------------------------------
+
+# _detect_sha256_cmd
+# Sets the module-global _sha256_cmd to the first available SHA-256
+# implementation. Preference order (REQ-010): sha256sum > shasum >
+# openssl. The chosen command is appended with caller-supplied args
+# when invoked; callers pipe the input through stdin and parse
+# `awk '{print $1}'` because all three forms share `<hash>  <suffix>`
+# output (digest extraction is portable).
+# Dies 1 if none of the three are on PATH.
+_detect_sha256_cmd() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        _sha256_cmd=sha256sum
+    elif command -v shasum >/dev/null 2>&1; then
+        _sha256_cmd=shasum
+    elif command -v openssl >/dev/null 2>&1; then
+        _sha256_cmd=openssl
+    else
+        die 1 "error: no SHA-256 implementation found in PATH (need sha256sum, shasum, or openssl)"
+    fi
+}
+
+# Resolve once at module load (after `die` is defined). Any call site
+# that needs SHA-256 reads the cached _sha256_cmd; the precedence is
+# fixed at script startup.
+_detect_sha256_cmd
+
+# Module-globals fed by `main` / `copy_skill` into write_lock.
+# Initialised empty so shellcheck (and any code path that runs
+# before the caller sets them, e.g. tests) sees a defined value.
+_cs_url=
+_cs_commit=
+
+# compute_content_hash <dir>
+# Sets the module-global _cch_hash to the SHA-256 of the sorted
+# concatenation of every regular file under <dir>, excluding any file
+# named `.skill-lock` (REQ-003). The hash is intentionally a content
+# fingerprint of the install, not a per-skill lockfile entry.
+# Empty-after-exclusion directories hash to SHA-256 of empty input
+# (`e3b0c44...b855`). The `sort` keeps the result independent of
+# the order `find` happens to surface files in (SCN-003-4).
+# Dies 1 if `_sha256_cmd` is unset (REQ-008).
+#
+# POSIX limitation: `$(find ... | sort)` captures the pipeline's exit
+# status from `sort`, not from `find`. Without `set -o pipefail` (not
+# POSIX), a `find` failure (e.g., permission-denied subdirectory) does
+# not propagate — the pipeline may still produce a partial-tree
+# fingerprint. This is documented as a known limitation rather than
+# fixed here; the spec was downgraded to match (REQ-008 no longer
+# requires `find` nonzero to die).
+compute_content_hash() {
+    _cch_dir=$1
+    if [ -z "${_sha256_cmd:-}" ]; then
+        die 1 "error: sha256 not detected (call _detect_sha256_cmd first)"
+    fi
+    _cch_list=$(find "$_cch_dir" -type f ! -name '.skill-lock' | sort)
+    if [ -z "$_cch_list" ]; then
+        # Empty input: feed an empty stream into SHA-256 so callers get
+        # a stable fingerprint for empty trees.
+        _cch_hash=$(printf '' | "$_sha256_cmd" | awk '{print $1}')
+    else
+        # shellcheck disable=SC2086  # word-split is intentional: $_cch_list
+        _cch_hash=$(cat $_cch_list | "$_sha256_cmd" | awk '{print $1}')
+    fi
+}
+
+# read_lock <dest_dir>
+# Populates the five read-side globals (_rl_url, _rl_commit, _rl_hash,
+# _rl_schema, _rl_installed_at) by parsing <dest_dir>/.skill-lock.
+# Skips `#` comments and blank lines; splits on the first `=` per
+# non-comment, non-blank line. Missing file, non-regular file
+# (e.g. lockfile is a directory due to corruption), or a lockfile
+# that lacks one of the expected keys leaves all five globals
+# empty and returns 0 (REQ-001). The bad-shape cases are NOT fatal:
+# `copy_skill` re-derives the truth from URL/commit/hash comparison,
+# so a corrupted lockfile just triggers a fresh reinstall.
+read_lock() {
+    _rl_dir=$1
+    _rl_url=
+    _rl_commit=
+    _rl_hash=
+    _rl_schema=
+    _rl_installed_at=
+    # SCN-001-2 + Edge Case: missing file or non-regular file → all
+    # globals stay empty, exit 0.
+    if [ ! -f "$_rl_dir/.skill-lock" ]; then
+        return 0
+    fi
+    # shellcheck disable=SC2162  # backslash handling not needed: data is KEY=VAL
+    while IFS= read -r _rl_line || [ -n "$_rl_line" ]; do
+        case $_rl_line in
+            '#'*|'') continue ;;
+        esac
+        # Split on the FIRST `=` only (values may contain `=`).
+        _rl_key=${_rl_line%%=*}
+        _rl_val=${_rl_line#*=}
+        case $_rl_key in
+            schemaVersion) _rl_schema=$_rl_val ;;
+            origin.url)    _rl_url=$_rl_val ;;
+            origin.commit) _rl_commit=$_rl_val ;;
+            installedAt)   _rl_installed_at=$_rl_val ;;
+            contentHash)   _rl_hash=$_rl_val ;;
+            # Unknown keys are ignored so future schema additions do
+            # not break older readers.
+        esac
+    done < "$_rl_dir/.skill-lock"
+}
+
+# write_lock <dest_skill_dir>
+# Atomically writes <dest_skill_dir>/.skill-lock with the four schema
+# fields plus the v1 header (REQ-002 / REQ-009). Source globals:
+#   _cs_url     canonicalized URL (matches origin.url in read_lock)
+#   _cs_commit  40-hex SHA (matches origin.commit in read_lock)
+#   _cch_hash   64-hex SHA-256 (matches contentHash in read_lock)
+# Atomicity (SCN-002-2): the file is built in `mktemp` and moved into
+# place via `mv`. A `trap` removes the temp file if the script exits
+# before `mv`, so the destination NEVER ends up with a half-written
+# lockfile (and never with a stale lockfile after a failed install).
+write_lock() {
+    _wl_dir=$1
+
+    # Compute the content hash BEFORE touching the filesystem, so we
+    # never leave behind an empty stale lockfile if hashing fails.
+    compute_content_hash "$_wl_dir"
+
+    _wl_tmp=$(mktemp) || die 1 "error: cannot create temp file for .skill-lock"
+    # Cleanup on any failure path: removed if we exit before `mv`.
+    trap 'rm -f "$_wl_tmp" 2>/dev/null; trap - EXIT INT TERM' EXIT INT TERM
+
+    {
+        printf '# agent-skills.sh skill-lock v1\n'
+        printf 'schemaVersion=1\n'
+        printf 'origin.url=%s\n' "$_cs_url"
+        printf 'origin.commit=%s\n' "$_cs_commit"
+        printf 'installedAt=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf 'contentHash=%s\n' "$_cch_hash"
+    } > "$_wl_tmp"
+
+    # Atomic install. `mv` inside the same filesystem is the POSIX-
+    # portable rename; readers always see either the prior lockfile
+    # or the fully-written replacement, never a partial one.
+    if ! mv "$_wl_tmp" "$_wl_dir/.skill-lock"; then
+        trap - EXIT INT TERM
+        rm -f "$_wl_tmp" 2>/dev/null
+        die 1 "error: cannot install .skill-lock to $_wl_dir"
+    fi
+    # Success path: clear the trap so the EXIT-mtime cleanup does not
+    # delete the now-renamed file. The temp file no longer exists at
+    # $_wl_tmp because `mv` consumed it.
+    trap - EXIT INT TERM
+}
+
 # prompt_choice <prompt> <max>
 # Reads a line from stdin, validates it is an integer in [1, max], echoes
 # the chosen number on stdout. Exits 1 on EOF or after 3 invalid attempts.
@@ -626,12 +778,26 @@ strip_dot_git() {
     fi
 }
 
-# copy_skill <src_dir> <dest_parent> <name>
+# copy_skill <src_dir> <dest_parent> <name> <url> <commit>
 # Copies <src_dir> to <dest_parent>/<name>, replacing any existing target.
+# The <url> and <commit> arguments feed the .skill-lock provenance
+# record (REQ-004 / REQ-007); they MUST be passed by every call site
+# and SHOULD be already canonicalized on the URL side. They feed
+# write_lock, which records the install into a v1 .skill-lock so the
+# next invocation can decide whether to reinstall or skip.
+# On a perfect match (URL + commit + contentHash all equal to the
+# stored values), copy_skill returns 0 BEFORE rm -rf — no copy, no
+# reinstall, no log line. On any mismatch, the existing tree is
+# removed, refreshed, and a fresh lockfile written. The lockfile is
+# written ONLY after both `cp -Rp` and `strip_dot_git` succeed, so a
+# partial install never leaves a stale lockfile behind (SCN-005-1).
+# Die 1 with an explicit message on schemaVersion != 1 (SCN-006-1).
 copy_skill() {
     _src=$1
     _dest_parent=$2
     _name=$3
+    _cs_url=$4
+    _cs_commit=$5
 
     _dest="${_dest_parent%/}/$_name"
 
@@ -639,6 +805,30 @@ copy_skill() {
         log "Creating destination directory: $_dest_parent"
         if ! mkdir -p -- "$_dest_parent"; then
             die 1 "error: cannot create destination '$_dest_parent'"
+        fi
+    fi
+
+    # Read the existing lockfile BEFORE any destructive action. A
+    # malformed lockfile (corrupt directory, schemaVersion!=1) is
+    # diagnosed here so we never run rm -rf against bad metadata.
+    if [ -f "$_dest/.skill-lock" ]; then
+        read_lock "$_dest"
+        if [ -n "$_rl_schema" ] && [ "$_rl_schema" != "1" ]; then
+            die 1 "error: unsupported schema version $_rl_schema (expected 1)"
+        fi
+    fi
+
+    # Skip path (REQ-004 / SCN-004-1): all three read-side fields
+    # match the caller-supplied live values AND the on-disk content
+    # hash equals the freshly-computed hash for <dest>. The hash step
+    # is what protects against local edits silently surviving a
+    # reinstall that "skipped".
+    if [ -f "$_dest/.skill-lock" ]; then
+        compute_content_hash "$_dest"
+        if [ "$_rl_url" = "$_cs_url" ] \
+            && [ "$_rl_commit" = "$_cs_commit" ] \
+            && [ "$_rl_hash" = "$_cch_hash" ]; then
+            return 0
         fi
     fi
 
@@ -654,6 +844,10 @@ copy_skill() {
     fi
 
     strip_dot_git "$_dest"
+
+    # Lockfile written AFTER cp + strip succeed — partial installs
+    # (SCN-005-1) leave no .skill-lock behind.
+    write_lock "$_dest"
 
     log "Installed: $_dest"
 }
@@ -857,8 +1051,21 @@ main() {
     # shellcheck disable=SC2086
     resolve_skills "$CACHE_DIR" $SKILL_NAMES > "$_pairs_tmp" || exit $?
 
+    # Capture the install provenance once per script run (REQ-007):
+    # URL is canonicalized via _canonicalize_url so the comparison
+    # against read_lock's stored URL stays stable across formatter
+    # variants (whitespace, .git suffix, host casing).
+    _cs_url=$(_canonicalize_url "$REPO_URL")
+    if ! _cs_commit=$(git -C "$CACHE_DIR" rev-parse HEAD 2>/dev/null); then
+        # rev-parse is part of `git` which the prerequisites already
+        # demand. Failing here means the cache is in an unusable
+        # state — abort rather than install a skill with no commit
+        # recorded.
+        die 1 "error: cannot read HEAD from cache $CACHE_DIR"
+    fi
+
     while IFS= read -r _r_name && IFS= read -r _r_src; do
-        copy_skill "$_r_src" "$DEST_DIR" "$_r_name"
+        copy_skill "$_r_src" "$DEST_DIR" "$_r_name" "$_cs_url" "$_cs_commit"
     done < "$_pairs_tmp"
 
     log "Done."
